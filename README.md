@@ -1,6 +1,6 @@
 # Subclone specific microenvironmental impact and drug responses in refractory multiple myeloma revealed by single cell transcriptomics
 
-Nextflow pipelines and R code for scRNA-seq analysis of relapsed and refractory multiple myeloma samples
+Nextflow pipelines and R code for scRNA-seq analysis of relapsed and refractory multiple myeloma samples.  
 Folders contain scripts to create figures and a pipeline to process the raw data. 
 
 ## Figures:
