@@ -17,7 +17,7 @@
 
 ## Figure 6
 - [HTML Preview Figure 6](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_6.nb.html)
-- [HTML Preview Figure 5 interactions](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_6_interaction.nb.html)
+- [HTML Preview Figure 6 interactions](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_6_interaction.nb.html)
 
 ## Figure 7
 - [HTML Preview Figure 7](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_7.nb.html)
