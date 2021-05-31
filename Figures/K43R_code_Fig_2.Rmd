@@ -1,0 +1,902 @@
+---
+title: "K43R_Fig_2 + Supplementary Fig_2 + 3"
+output: html_notebook
+---
+
+
+```{r setup}
+library(dplyr)
+library(tidyverse)
+library(Seurat)
+library(ggplot2)
+library(sctransform)
+library(qs)
+library(RhpcBLASctl)
+library(ggpointdensity)
+library(viridis)
+library(patchwork)
+library(data.table)
+library(presto)
+library(RColorBrewer)
+library(ComplexHeatmap)
+library(circlize)
+library(phylogram)
+library(dendextend) 
+```
+
+
+
+## For InferCNV code (Sup_Fig.2) -> see Nextflow pipeline
+
+
+### for reduced UMAP visualization
+```{r}
+blank <- theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),legend.position="none",
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
+```
+
+
+### Load complete RRMM dataset (all patients, all time-points, BME + PCs) + metadata
+```{r}
+K43R_all <- qread(".../K43R_all.qs")
+```
+
+### Filter PCs
+```{r}
+Idents(K43R_all) <- "major_population"
+PCs <- subset(K43R_all, idents = "PCs")
+```
+
+```{r}
+blas_set_num_threads(1)
+omp_set_num_threads(1)
+options(future.globals.maxSize=50*1024^3) 
+PCs <- SCTransform(PCs, vars.to.regress = c("percent.mt", "G2M.Score", "S.Score", "nFeature_RNA"), verbose = F)
+```
+
+### PCA
+```{r fig.width=4, fig.height=3}
+PCs <- RunPCA(object = PCs, npcs = 100, verbose = FALSE)
+ElbowPlot(object = PCs, ndims = 100)
+```
+
+```{r}
+PCs <- FindNeighbors(object = PCs, reduction = "pca", dims = 1:100)
+PCs <- FindClusters(PCs, resolution = 0.3, verbose = F)
+PCs <- RunUMAP(object = PCs, reduction = "pca", dims = 1:100, verbose = F)  
+```
+
+UMAP colored by subject
+```{r fig.width=5.5, fig.height=5}
+p1 <- DimPlot(object = PCs, reduction = 'umap', pt.size = 0.0001, 
+              group.by = "PID_new") + 
+  scale_color_manual(values=c(
+  "dodgerblue2", 
+  "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "maroon",
+  "#FF7F00", 
+  "gold1",
+  "skyblue2", 
+  "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "yellow4", # lt orange
+  "gray50", 
+  "khaki2",
+  "black", # orange, 
+  "orchid1", 
+  "deeppink1", 
+  "blue1", 
+  "steelblue4",
+  "darkturquoise", 
+  "yellow4", 
+  "yellow3"
+  ))+
+  theme(legend.position = "none") + blank
+p1
+```
+
+
+```{r fig.width=3, fig.height=3}
+df <- as.data.frame(table(PCs$PID_new[PCs$celltype_1=="PC"]))
+df <- df[order(df$Freq),]
+bp<- ggplot(df, aes(x="", y=Freq, fill=Var1))+
+geom_bar(width = 1, stat = "identity")+ 
+  scale_fill_manual(values=c(
+  "dodgerblue2", 
+  "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "maroon",
+  "#FF7F00", 
+  "gold1",
+  "skyblue2", 
+  "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "yellow4", # lt orange
+  "gray50", 
+  "khaki2",
+  "black", # orange, 
+  "orchid1", 
+  "deeppink1", 
+  "blue1", 
+  "steelblue4",
+  "darkturquoise", 
+  "yellow4", 
+  "yellow3"
+  ))
+pie <- bp + coord_polar("y", start=0) 
+pie1 <- pie +
+  theme(legend.position = "none") +
+  blank
+pie1
+```
+
+
+#### fraction of nPCs per patient
+```{r fig.width=5, fig.height=2.5}
+df <- as.data.frame(table(PCs$PID_new[PCs$celltype_1=="PC"]))
+df <- rbind(df,RRMM20 = 0)
+df2 <- as.data.frame(table(PCs$PID_new))
+df3 <- cbind(df, df2$Freq)
+df3$prop <- with(df3, Freq / df2$Freq)
+
+p1 <- ggplot(df3, aes(y=prop, x=reorder(Var1, -prop))) + 
+    geom_bar(position="dodge", stat="identity", color="black") +
+ theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.background=element_blank()) +
+  xlab("") + ylab("Fraction of nPCs") 
+p1
+```
+
+
+
+
+### Subset myeloma cells only (remove nPCs)
+```{r}
+Idents(PCs) <- "celltype_1"
+Myeloma <- subset(PCs, idents= "PC", invert = T) 
+```
+
+
+### Matrices tumor cells
+##1) based on cytogenetics
+```{r fig.width=6.5, fig.height=6}
+## Annotation
+df_ann <- FetchData(Myeloma, vars = c("pid_id","hyperdiploidy"))
+df_ann_sum <- df_ann %>% 
+  group_by(pid_id)  %>% summarise_all(funs(toString(unique(.[!is.na(.)]))))
+df_ann_sum <- df_ann_sum[-c(4,19, 20,22, 24, 25,33),] # remove patients with no cytogenetic information
+
+ha <- rowAnnotation(Hyperdyploid = df_ann_sum$hyperdiploidy, 
+                    col = list(Hyperdyploid = c("F" = "grey90", "T"="maroon")))
+
+
+## Cytogenetic heatmap
+df <- FetchData(Myeloma, vars = c("pid_id","t11.14", "t4.14", "t14.16", 
+                                  "gain_1q21", "gain_5p15", "gain_5q13", "gain_5q35", "gain_6p21", "gain_8q24", 
+                                  "gain_9q34", "gain_11q13", "gain_11q22.3", "gain_15q22", "gain_19q13", 
+                                  "del_8p21", "del_11q22", "del_13q14", "del_14q32", "del_16q23", "del_17p13",
+                                  "re_MYC", "re_IGH"))
+
+df_sum <- df %>% 
+  group_by(pid_id)  %>% summarise_all(funs(toString(unique(.[!is.na(.)]))))
+  
+df_sum <- df_sum[-c(4,19, 20,22, 24, 25,33),] # remove samples with no cytogenetic information
+
+df_sum <- tibble::column_to_rownames(df_sum, "pid_id")
+
+require(ComplexHeatmap)
+dist_letters = function(x, y) {
+    x = strtoi(charToRaw(paste(x, collapse = "")), base = 16)
+    y = strtoi(charToRaw(paste(y, collapse = "")), base = 16)
+    sqrt(sum((x - y)^2))
+}
+
+colors = c("white", "black")
+hm1 <- Heatmap(df_sum, clustering_distance_rows = dist_letters,
+              clustering_distance_columns = dist_letters, 
+              col = colors, 
+              rect_gp = gpar(col = "grey", lwd = 1), 
+              right_annotation = ha)
+hm1
+```
+
+
+
+### Using averaged expression
+```{r fig.width=7, fig.height=6}
+### calculate average expression correlations
+Idents(Myeloma) <- "PID_new"
+av.exp <- AverageExpression(Myeloma, assays = "SCT", slot = "scale.data", verbose = F)$SCT
+cor.exp <- as.matrix(cor(av.exp, method = "pearson"))
+diag(cor.exp) = 0
+
+# get average gene expression of drivers
+av.exp_obj <- AverageExpression(Myeloma, assays = "SCT", slot = "data", verbose = F, return.seurat = T)
+matrix <- GetAssayData(object = av.exp_obj, slot = "counts")
+df <- as.data.frame(matrix)
+df <- t(df)
+df <- as.data.frame(df)
+df <- df %>% select(CCND1, MYC, NSD2, RPL7A, MYC, MAFB, CCND2)
+df <- tibble::rownames_to_column(df, "PID_new")
+
+
+# get metadata info
+df_ann <- FetchData(Myeloma, vars = c("PID_new","hyperdiploidy", "t4.14", "t11.14", "del_17p13"))
+df_ann_sum <- df_ann %>% 
+  group_by(PID_new)  %>% summarise_all(funs(toString(unique(.[!is.na(.)]))))
+
+df_ann_sum[df_ann_sum=="0, 1"] <- "1" # change heterogeneously detected to detected
+df_ann_sum[df_ann_sum=="1, 0"] <- "1"
+df_ann_sum[df_ann_sum==""] <- NA
+
+df_ann_sum <- df_ann_sum[ order(match(df_ann_sum$PID_new, df$PID_new)), ]
+df_final <- cbind(df, df_ann_sum)
+
+#specify colors and breaks for average gene expression values
+col_fun1 = colorRamp2(c(0, 40), c("white", "chartreuse4"))
+
+col_fun3 = colorRamp2(c(0, 4), c("white", "chartreuse4"))
+col_fun4 = colorRamp2(c(0, 30), c("white", "chartreuse4"))
+col_fun5 = colorRamp2(c(0, 0.1), c("white", "chartreuse4"))
+col_fun6 = colorRamp2(c(0, 4), c("white", "chartreuse4"))
+
+ha <- HeatmapAnnotation(Hyperdyploidy = df_final$hyperdiploidy, 
+                        t11.14 = df_final$t11.14, 
+                        t4.14 = df_final$t4.14,
+                        RPL7A = df_final$RPL7A,
+                        CCND2 = df_final$CCND2,
+                        CCND1 = df_final$CCND1,
+                        MAFB = df_final$MAFB,
+                        NSD2 = df_final$NSD2,
+                        col = list(Hyperdyploidy = c("F" = "grey90", "T"="black"),
+                                   t11.14 = c("0" = "grey90", "1" = "black"),
+                                   t4.14 = c("0" = "grey90", "1" = "black"),
+                                   RPL7A = col_fun1,
+                                   CCND2 = col_fun3,
+                                   CCND1 = col_fun4,
+                                   MAFB  = col_fun5,
+                                   NSD2  = col_fun6),
+                        na_col = "grey40")
+
+
+
+ComplexHeatmap::Heatmap(cor.exp, rect_gp = gpar(col = "black", lwd = 0.1), top_annotation = ha) 
+```
+
+
+
+
+### Correlation FISH - InferCNV percentages
+```{r fig.width=4, fig.height=4}
+library(ggpubr)
+
+# load percentages of 1q cells from FISH and InferCNV (see supp. file 1)
+df <- read.csv("/Volumes/ag-rippe/NGS_Stephan/HIPO2_K43R/Analysis_v3/_Metadata_info/CNVs/FISH_InferCNV_percentages.csv", sep = ";", header = T, dec = ",") 
+
+# remove rows with NA
+df <- df[-c(5, 19, 20, 23, 24, 25,35), ]
+
+df$FISH_1q21_perc <- as.numeric(as.character(df$FISH_1q21_perc))
+df$InferCNV_1q_perc <- as.numeric(as.character(df$InferCNV_1q_perc))
+
+ 
+ require(ggpubr)
+p1 <- ggplot(df, aes(x=FISH_1q21_perc, y=InferCNV_1q_perc)) +
+  geom_point(colour="black", size=5, alpha = 0.3) +
+  theme(legend.position = "none")+
+  theme(panel.background=element_blank(), 
+        axis.line = element_line(size = .5, colour = "black")) +
+  xlab("Fraction of cells with 1q21 gain (iFISH)") +
+  ylab("Fraction of cells with 1q gain (InferCNV)") 
+  geom_text()
+ p1 <- p1 + stat_cor(method = "pearson") 
+p1
+
+
+```
+
+### Cluster-clone & cell number relationship
+```{r fig.width=11, fig.height=3}
+df <- read_excel("/Volumes/ag-rippe/NGS_Stephan/HIPO2_K43R/Analysis_v3/_Metadata_info/CNVs/K43R_summary_cluster_clones.xlsx") 
+
+p1 <- ggplot(df, aes(x=cell_number, y=clusters)) + 
+  geom_point(size=2.5) + 
+  scale_x_continuous(trans='log10') +
+  theme(panel.background=element_blank(), axis.line = element_line(size = 0.5, colour = "black")) + 
+  scale_color_manual(values=c("#999999", "#E69F00", "#56B4E9"))  + 
+  theme(legend.position = "none") + stat_cor(method = "pearson") + stat_cor(method = "pearson") +
+  geom_smooth(method=lm, color="black", size= 0.5)
+
+
+p2 <- ggplot(df, aes(x=clusters, y=clones)) + 
+  geom_point(aes(size=cell_number))  +
+  theme(panel.background=element_blank(), axis.line = element_line(size = 0.5, colour = "black")) + 
+  scale_color_manual(values=c("#999999", "#E69F00", "#56B4E9")) + stat_cor(method = "pearson") +
+  geom_smooth(method=lm, color="black", size= 0.5) +
+  ylim(0,14)
+
+
+df_2 <- df %>% 
+    group_by(deviation_group) %>% 
+    count()
+
+df_2$deviation_group <- factor(df_2$deviation_group,   # Change ordering manually
+                  levels = c("0–2", "3-4", ">4"))
+
+p3 <- ggplot(data=df_2, aes(x=deviation_group, y= n)) +
+  geom_bar(stat="identity", width=0.5) +
+ theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab("cluster-clone # deviation") + ylab("Number of patients") +
+  theme_minimal()
+
+  
+p4 <- p1 | p2 | p3
+p4
+```
+
+
+
+## 1q-gain signature
+### Perform DEA between clone with 1q-gain vs. most similar clone without 1q gain for all patients with subclonal 1q-gain
+e.g. for RRMM05 (ID="6KLSUS"):
+```{r}
+Idents(Myeloma) <- "patient"
+Tumor_6KLSUS <- subset(Myeloma, idents= "6KLSUS") 
+
+DEA <- wilcoxauc(Tumor_6KLSUS, group_by = "tumor_clone",groups_use = c("6KLSUS_clone_2","6KLSUS_clone_3"), seurat_assay = "SCT", assay = "data")
+DEA <- DEA %>% filter(group=="6KLSUS_clone_2")
+DEA <- DEA %>% filter(padj < 0.05)
+DEA_clone_6KLSUS <- DEA %>% filter(logFC > 0.1)
+```
+other comparisons:
+- RRMM03: cl.2 vs. cl.3
+- RRMM07: cl.2 vs. cl.3
+- RRMM08: cl.1 vs. cl.2
+- RRMM09: cl.2 vs. cl.1
+- RRMM10: cl.2 vs. cl.1
+- RRMM11: cl.2 vs. cl.3
+- RRMM13: cl.2 vs. cl.3
+- RRMM16: cl.4 vs. cl.5
+- RRMM19: cl.1 vs. cl.2
+
+
+```{r}
+## load all DEA gene lists and compute overlap
+require(ComplexHeatmap)
+m = make_comb_mat(list_1q)
+comb_name(m)
+```
+-> Make list in excel including literature curation and annotation (include only genes with intersect > 5)
+
+
+### Load annotated 1q-up signature gene list (see sup. file 2)
+```{r}
+df_1q <- read.table(sep = ";",header = T,
+                    ".../Signature_1q_up.csv")
+
+```
+
+
+###Plot signature with annotations and intersect ratio
+```{r fig.width=6, fig.height=9}
+p1 <- ggplot(df_1q, aes(y=intersect_fraction, x=reorder(gene, intersect_fraction), fill = gene_function)) + 
+    geom_bar(position="dodge", stat="identity") +
+    facet_grid(gene_function ~., scales = "free", space = "free") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 0), panel.background=element_blank()) +
+    xlab("") + ylab("Fraction of subjects with subclonal 1q gain") + coord_flip() +scale_fill_brewer(palette="Paired")
+p1
+```
+
+
+Add 1q signature score
+```{r}
+df_1q <- df_1q[1]
+genes_1q_up <- as.character(df_1q$gene)
+genes_1q_up <- list(c(genes_1q_up))
+Myeloma <- AddModuleScore(Myeloma, features = genes_1q_up, name = "Up_1q_score", assay = "SCT")
+```
+
+
+
+
+## Generate plot: Average signature score vs fraction of cells with 1q-gain with both patient and sample information
+#### First patient-wise
+```{r fig.width=5, fig.height=9}
+df <- FetchData(Myeloma, vars = c("patient","sc_gain_1q"))
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>% 
+  group_by(patient) %>% 
+  dplyr::count(sc_gain_1q, .drop = T) %>% 
+  mutate(prop=prop.table(n)) %>% 
+  mutate(prop=format(prop,digits=2))
+df_freq$prop <- as.numeric(as.character(df_freq$prop))
+
+
+df_freq <- df_freq %>% filter(sc_gain_1q=="T") 
+df_freq <- df_freq[, c(1,4)]
+
+## Add samples with 0 cells with 1q gain again
+patient <- c("6K8YTY", "R1V8RN","XF2DTB")
+prop <- c(0, 0, 0)
+data <- data.frame(patient, prop)
+
+
+data_combi <- bind_rows(df_freq, data)
+
+
+### Avg. signature expression taken from ggplot (Dotplot) Object
+p1 <- DotPlot(Myeloma, dot.scale = 7,
+         features = c("Up_1q_score1"), group.by = "patient") + 
+  RotatedAxis()+ 
+  scale_color_gradient( low="blue",high="red") +
+  theme(axis.text.x = element_text(size=10))+
+  theme(axis.text.y = element_text(size=12))
+
+df_2 <- p1$data
+df_2 <- p1$data
+df_2 <- df_2[,c(4,5)]
+rownames(df_2) <- NULL
+colnames(df_2) <- c("patient", "avg_score")
+
+data_all <- merge(data_combi, df_2, by= "patient")
+
+
+## Add cytogenetic information for 1q21 gain
+df <- FetchData(Myeloma, vars = c("patient","gain_1q21"))
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>%
+  group_by(patient) %>%
+  dplyr::count(gain_1q21, .drop = T)
+df_freq <- df_freq[1:36,]
+
+data_all <- merge(data_all, df_freq, by="patient")
+
+data_all$gain_1q21 <- as.character(data_all$gain_1q21)
+data_all$gain_1q21[is.na(data_all$gain_1q21)] <- "NA"
+
+data_all_patient <- data_all
+data_all_patient$gain_1q21 <- "patient"
+colnames(data_all_patient) <- c("pid_id", "prop", "avg_score", "gain_1q21", "n")
+
+```
+
+### Sample wise
+```{r fig.width=5, fig.height=9}
+df <- FetchData(Myeloma, vars = c("pid_id","sc_gain_1q"))
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>% 
+  group_by(pid_id) %>% 
+  dplyr::count(sc_gain_1q, .drop = T) %>% 
+  mutate(prop=prop.table(n)) %>% 
+  mutate(prop=format(prop,digits=2))
+df_freq$prop <- as.numeric(as.character(df_freq$prop))
+
+
+df_freq <- df_freq %>% filter(sc_gain_1q=="T") 
+df_freq <- df_freq[, c(1,4)]
+
+## Add samples with 0 cells with 1q gain again
+pid_id <- c("P04-pre-Tumor","P04-post-Tumor", "P14-pre-Tumor","P14-post-Tumor", "P17-post-Tumor")
+prop <- c(0, 0, 0, 0, 0)
+data <- data.frame(pid_id, prop)
+
+
+data_combi <- bind_rows(df_freq, data)
+
+
+### Avg. signature expression taken from ggplot (Dotplot) Object
+p1 <- DotPlot(Myeloma, dot.scale = 7,
+         features = c("Up_1q_score1"), group.by = "pid_id") + 
+  RotatedAxis()+ 
+  scale_color_gradient( low="blue",high="red") +
+  theme(axis.text.x = element_text(size=10))+
+  theme(axis.text.y = element_text(size=12))
+p1
+
+df_2 <- p1$data
+df_2 <- p1$data
+df_2 <- df_2[,c(4,5)]
+rownames(df_2) <- NULL
+colnames(df_2) <- c("pid_id", "avg_score")
+
+data_all <- merge(data_combi, df_2, by= "pid_id")
+
+
+### Add cytogenetic information for 1q21 gain
+df <- FetchData(Myeloma, vars = c("pid_id","gain_1q21"))
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>% 
+  group_by(pid_id) %>% 
+  dplyr::count(gain_1q21, .drop = T)
+df_freq <- df_freq[1:36,]
+
+data_all <- merge(data_all, df_freq, by="pid_id")
+
+data_all$gain_1q21 <- as.character(data_all$gain_1q21)
+data_all$gain_1q21[is.na(data_all$gain_1q21)] <- "NA"
+
+data_all_sample <- data_all
+
+```
+
+
+## Plot both together
+```{r fig.width=5 ,fig.height=3.8}
+data_all <- rbind(data_all_sample, data_all_patient)
+
+require(ggpubr)
+p1 <- 
+  data_all %>% mutate(psize=ifelse(gain_1q21=="patient",0.5,1)) %>% 
+  ggplot(aes(x=prop, y=avg_score,size=psize)) +
+  geom_point(aes(fill=gain_1q21), 
+       colour="black",pch=21) +
+  scale_size(range = c(2,4)) +
+  theme(panel.background=element_blank(), 
+        axis.line = element_line(size = .5, colour = "black")) +
+  xlab("Fraction of cells with 1q gain") +
+  ylab("avg. signature score (1q gain up)") +
+  scale_fill_manual(values=c("#E69F00", "#56B4E9","#999999", "firebrick")) 
+p1
+```
+
+
+
+
+### PLot 1q score for groups as Violinplot
+```{r fig.width=2.5 ,fig.height=3.8}
+Idents(Myeloma) <- "sc_gain_1q_classification"
+levels(Myeloma) <- c("sc_1q-low", "sc_1q-int","sc_1q-high")
+                                           
+df <- as.data.frame(Myeloma@active.ident)
+Myeloma <- AddMetaData(Myeloma, col.name = "sc_gain_1q_classification", metadata = df)
+```
+
+
+```{r fig.width=3 ,fig.height=3.8}
+p3 <- VlnPlot(Myeloma, features = "Up_1q_score1", group.by = "sc_gain_1q_classification", pt.size = 0,
+               slot = "data", assay = "SCT", sort = F) +
+  geom_boxplot(width=.2, outlier.colour=NA, fill= "white", lwd=0.7, fatten =0) +
+    stat_summary(fun = mean, geom = "errorbar", aes(ymax = ..y.., ymin = ..y..),
+               width = 0.2, size = 1, linetype = "solid") + 
+  theme(legend.position = "none") + stat_compare_means() +scale_fill_brewer(palette="Dark2")
+p3$layers[[1]]$aes_params$size = 0.9
+p3
+```
+
+
+
+## Patient RRMM05 only (ID: 6KLSUS)
+```{r}
+Idents(K43R_all) <- "patient"
+Tumor_6KLSUS <- subset(K43R_all, idents = "6KLSUS")
+```
+
+
+```{r echo=T,error = F, message = F, warning = F, verbose = F, eval=F}
+
+blas_set_num_threads(1)
+omp_set_num_threads(1)
+options(future.globals.maxSize=50*1024^3) 
+Tumor_6KLSUS <- SCTransform(Tumor_6KLSUS, vars.to.regress = c("percent.mt", "G2M.Score", "S.Score"), 
+                            verbose = F, do.scale = F, return.only.var.genes = F)
+```
+
+### PCA
+```{r fig.width=4, fig.height=3}
+Tumor_6KLSUS <- RunPCA(object = Tumor_6KLSUS, npcs = 50, verbose = FALSE)
+ElbowPlot(object = Tumor_6KLSUS, ndims = 50)      
+
+```
+
+
+```{r}
+Tumor_6KLSUS <- RunHarmony(Tumor_6KLSUS, group.by.vars = "sorting", assay.use="SCT",   max.iter.harmony = 5, verbose = F)
+```
+
+#### Clustering etc.
+```{r}
+Tumor_6KLSUS <- FindNeighbors(object = Tumor_6KLSUS, reduction = "harmony", dims = 1:30)
+Tumor_6KLSUS <- FindClusters(Tumor_6KLSUS, resolution = .3, verbose = F)
+Tumor_6KLSUS <- RunUMAP(object = Tumor_6KLSUS, reduction = "harmony", dims = 1:30, verbose = F)
+```
+
+
+### Add InferCNV info
+```{r fig.width=4, fig.height=3}
+infercnv.observations <- ".../6KLSUS/InferCNV_out/infercnv.observations_dendrogram.txt"
+
+# get and visualize the dendrogram
+
+dend <- as.hclust(read.dendrogram(infercnv.observations))
+plot(dend,labels = FALSE,hang = -1,xlab = "scRNA",ylab = "distance")
+```
+
+
+#### Load CNV heatmap
+```{r echo=T}
+
+knitr::include_graphics(".../6KLSUS/InferCNV_out/infercnv.21_denoised.png")
+```
+
+#### Define number of clones by k-means clustering (general approach --> has been also done with other patients)
+```{r fig.width=4, fig.height=3}
+NCLONES <- 5
+
+tp <- color_branches(dend, k = NCLONES)
+plot(tp,leaflab = 'none')
+```
+
+
+
+```{r}
+g <- cutree(dend,k = NCLONES)
+groups <- data.frame(BARCODE=names(g),#BARCODE=barcodes,
+                     CLONE=as.numeric(g),
+                     stringsAsFactors = F)
+
+names <- as.data.frame(colnames(Tumor_6KLSUS))
+names(names)[1] <- "Barcode"
+names <- as.vector(as.character(names$Barcode))
+combi_names_sort <- groups[match(names, groups$BARCODE),]
+
+Tumor_6KLSUS <- AddMetaData(Tumor_6KLSUS, col.name = "tumor_clone", combi_names_sort$CLONE)
+
+Tumor_6KLSUS[["tumor_clone"]] <- ifelse(Tumor_6KLSUS$tumor_clone=="1","6KLSUS_clone_1",as.character(Tumor_6KLSUS$tumor_clone))
+Tumor_6KLSUS[["tumor_clone"]] <- ifelse(Tumor_6KLSUS$tumor_clone=="2","6KLSUS_clone_2",as.character(Tumor_6KLSUS$tumor_clone))
+Tumor_6KLSUS[["tumor_clone"]] <- ifelse(Tumor_6KLSUS$tumor_clone=="3","6KLSUS_clone_3",as.character(Tumor_6KLSUS$tumor_clone))
+Tumor_6KLSUS[["tumor_clone"]] <- ifelse(Tumor_6KLSUS$tumor_clone=="4","6KLSUS_clone_4",as.character(Tumor_6KLSUS$tumor_clone))
+Tumor_6KLSUS[["tumor_clone"]] <- ifelse(Tumor_6KLSUS$tumor_clone=="5","6KLSUS_clone_5",as.character(Tumor_6KLSUS$tumor_clone))
+```
+
+
+
+```{r fig.width=12, fig.height=4}
+p1 <- DimPlot(object = Tumor_6KLSUS, reduction = 'umap', pt.size = 0.5, label = F, group.by = "tumor_cluster", cols = "Dark2") +
+  blank +
+  ggtitle("cluster")
+  
+p2 <- DimPlot(object = Tumor_6KLSUS, reduction = 'umap', pt.size = 0.5, label = F, group.by = "tumor_clone") +
+  blank +
+  ggtitle("clones")
+  
+
+cells.use <- names(Tumor_6KLSUS@active.ident[Tumor_6KLSUS@meta.data$tumor_clone=="6KLSUS_clone_2"])
+p3 <- DimPlot(object = Tumor_6KLSUS, reduction = 'umap', pt.size = 0.5, label = F, 
+              cells.highlight = cells.use, sizes.highlight = 1, cols.highlight = "black") +
+  blank +
+  ggtitle("clone_2 only")
+
+p4 <- p1 | p2 | p3
+p4
+```
+
+
+
+# plot clone fraction
+```{r fig.width=1.5, fig.height=3}
+df <- FetchData(Tumor_6KLSUS, vars = c("tumor_clone"))
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>% 
+  group_by(tumor_clone) %>%
+  summarise(n = n()) %>%
+  mutate(freq = n / sum(n)) %>% 
+  mutate(freq=format(freq,digits=2))
+
+df_freq$freq <- as.numeric(as.character(df_freq$freq))
+
+p1 <- ggplot(df_freq, aes(y=freq, x=tumor_clone, fill = tumor_clone)) +
+    geom_bar(stat="identity", color = "black")  +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10), panel.background=element_blank()) +
+  xlab("clone") + ylab("Cell fraction") + 
+  theme(legend.position = "none")
+p1
+
+```
+
+
+
+
+### Heatmap of upregulated genes
+```{r fig.width=9, fig.height=3}
+DEA_clone_6KLSUS <- DEA_clone_6KLSUS %>% filter(logFC > 0.1)
+
+Idents(Tumor_6KLSUS) <- "tumor_clone"
+cl_2_3 <- subset(Tumor_6KLSUS, idents = c("6KLSUS_clone_2", "6KLSUS_clone_3"), downsample = 1000)
+
+p1 <- DoHeatmap(cl_2_3, features = DEA_clone_6KLSUS$feature, group.by = "tumor_clone",
+          group.colors = c("#A3A500", "#00BF7D"), group.bar.height = 0.05, size = 4, raster = F)+
+  scale_fill_gradient2( low="blue",high="red", mid = "white")
+p1
+```
+
+
+
+
+#### Link upregulated DE genes in Clone_2 to chromosomal locations 
+```{r fig.width=3.5, fig.height=2.7}
+DEA_up <- DEA %>% filter(logFC > 0.1)
+DEA_up <- DEA_up[c(1)]
+df <- read.table("/media/ag-rippe/NGS_Stephan/General/gene_lists/gencode_v28_CR_ref_gene_pos.txt")  # CellRanger derived position file
+df <- df[ -c(3,4) ]
+
+df_2 <- data.frame(feature=DEA_up$feature, chr=df[match(DEA_up$feature, df$V1),2])
+
+df_2$chr <- as.character(df_2$chr)
+df_2$chr[is.na(df_2$chr)] <- "X"
+
+df_2 <- df_2 %>% modify_if(is.character, as.factor)
+
+df_count <- plyr::count(df_2, vars = "chr")
+df_prop <- df_count %>% 
+  mutate(prop=prop.table(freq)) %>% 
+  mutate(prop=format(prop,digits=2))
+df_prop$prop <- as.numeric(as.character(df_prop$prop))
+
+
+#Located on 1p =12 genes
+# Add row for 1q location (123-12)/348=0.32
+
+df_add <- data.frame("chr1q", 111,0.32)
+names(df_add) <- c("chr", "freq", "prop")
+df_prop <- rbind(df_prop, df_add)
+
+
+p1 <- df_prop %>%
+  mutate(chr = fct_relevel(chr, 
+            "chr1","chr1q", "chr2", "chr3", "chr4", "chr5", 
+            "chr6", "chr7", "chr8","chr9","chr10", "chr11", 
+            "chr12","chr13", "chr14", "chr15", "chr16", "chr17","chr18",
+            "chr19","chr20", "chr21", "chr22", "X")) %>%
+  ggplot( aes(y=prop, x=chr)) +
+    geom_bar(color="black",stat="identity")  +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10), panel.background=element_blank()) +
+  xlab("Chromosome") + ylab("Fraction of DE genes")
+p1
+
+
+
+```
+
+
+
+### Clustering of nPCs
+#### Open clean file with all cells
+```{r}
+K43R_all_5 <- qread("/K43R_all_5.qs")
+Idents(K43R_all_5) <- "major_population"
+PCs_RRMM <- subset(K43R_all_5, idents = "PCs")
+
+```
+
+```{r}
+## nPCs Object from both HCA and RRMM
+object <- qread("/Myeloma_nPCs_HCA.qs")
+Idents(object) <- "donor_status"
+nPC_HCA <- subset(object, idents = "healthy")
+
+```
+
+```{r echo=T,error = F, message = F, warning = F, verbose = F, eval=F}
+blas_set_num_threads(1)
+omp_set_num_threads(1)
+options(future.globals.maxSize=50*1024^3) 
+PC_all <- SCTransform(PC_all, vars.to.regress = c("percent.mt", "G2M.Score", "S.Score", "nFeature_RNA"), verbose = F)
+```
+
+### PCA
+```{r fig.width=4, fig.height=3}
+PC_all <- RunPCA(object = PC_all, npcs = 100, verbose = FALSE)
+ElbowPlot(object = PC_all, ndims = 100)
+```
+
+```{r echo=T,error = F, message = F, warning = F, verbose = F, eval=F}
+PC_all <- FindNeighbors(object = PC_all, reduction = "pca", dims = 1:100)
+PC_all <- FindClusters(PC_all, resolution = 0.3, verbose = F)
+PC_all <- RunUMAP(object = PC_all, reduction = "pca", dims = 1:100, verbose = F)  
+```
+
+## adapt metadata
+```{r}
+PC_all[["celltype_1"]] <- ifelse(PC_all$donor_status=="healthy","nPC_HCA",as.character(PC_all$celltype_1))
+PC_all[["celltype_1"]] <- ifelse(PC_all$celltype_1=="PC","nPC_RRMM",as.character(PC_all$celltype_1))
+
+```
+
+### plot UMAP
+```{r fig.width=6, fig.height=3}
+p1 <- DimPlot(object = PC_all, reduction = 'umap', pt.size = 0.01, label = F,label.size = 2, 
+              group.by = "PID_new", order="RRMM15") + 
+              ggtitle("donor") +
+              blank
+
+p2 <- DimPlot(object = PC_all, reduction = 'umap', pt.size = 0.01, label = F, label.size = 2, 
+              group.by = "celltype_1", cols = c("firebrick","yellow3", "cyan3"), order = "Myeloma") + 
+              ggtitle("PC type") +
+              blank
+
+
+  
+p3 <- p1 | p2 
+p3
+```
+
+
+
+
+## Bulk analysis +1q
+```{r}
+library(EnhancedVolcano)
+library(ggplot2)
+library(readxl)
+```
+
+
+```{r}
+# DESeq2 results from bulk analysis
+DEA <- read.csv("~/DiffGenes_RNAseq_MM5_1qgain_yes_vs_no.csv")
+DEA_f <- na.omit(DEA, cols = "padj")
+
+# +1q signature genes
+plus_1q <- read_excel("~/Sup_data_02_1q_signature.xlsx")
+```
+
+
+### generate Volcano plot
+```{r fig.width=10, fig.height=14}
+p1 <- EnhancedVolcano(DEA_f,
+    lab = DEA_f$X,
+    selectLab = plus_1q$Gene,
+    labSize = 4,
+    x = 'log2FoldChange',
+    y = 'padj',
+    xlim = c(0, 1.5),
+    ylim = c(0,8.2),
+    title = NULL,
+    subtitle = NULL,
+    FCcutoff = 0.1,
+    pCutoff=0.05,
+    pointSize = 1.5,
+    axisLabSize = 11,
+    caption = NULL,
+    colAlpha = 1/2, 
+    col = c("grey30", "grey30", "grey30", "red2"),
+    gridlines.major = F,
+    gridlines.minor = F,
+    boxedLabels = F,
+    drawConnectors = T,
+    widthConnectors = 0.2,
+    endsConnectors = "last",
+    
+) 
+p1
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

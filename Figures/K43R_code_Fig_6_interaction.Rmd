@@ -1,0 +1,247 @@
+---
+title: "RRMM TAM Interaction Analysis Figure 6 and Supplementary Figure 7"
+output: html_notebook
+---
+
+```{r setup}
+suppressPackageStartupMessages({
+library(Seurat)
+library(qs)
+library(scales)
+options(dplyr.summarise.inform = FALSE)
+library(tidyverse)
+library(igraph)
+library(tidygraph)
+library(ggraph)
+})
+
+```
+
+# Preparation for the TAM figure
+
+Combined object of RRMM microenvironment
+```{r eval=FALSE}
+all_me <- qread("/media/ag-rippe/NGS_Stephan/HIPO2_K43R/Analysis_v3/_Final_Objects/Data_objects/K43R_all_5.qs",nthreads=10)
+```
+
+Combined object of HCA BM microenvironment
+```{r eval=FALSE}
+all_me_hca <- qread("/media/ag-rippe/NGS_Stephan/HIPO2_K43R/Analysis_v3/_Final_Objects/Data_objects/HCA_K43R_ME_integrated.qs",nthreads=10)
+all_me_hcao <- subset(all_me_hca,donor_status=="healthy")
+```
+
+Finer coarsed annotation of TAMS in celltype_2 slot
+```{r eval=FALSE}
+all_me$celltype_1 <- ifelse(is.na(all_me$celltype_2),all_me$celltype_1,all_me$celltype_2)
+all_me_hcao$celltype_1 <- ifelse(is.na(all_me_hcao$celltype_2),as.character(all_me_hcao$celltype_1),all_me_hcao$celltype_2)
+```
+
+Write combined RRMM dataset SCT count matrix to csv for CellPhoneDB
+```{r eval=FALSE}
+countmatrix <- GetAssayData(object = all_me, assay = "SCT", slot = "data")
+write_dgCMatrix_csv(countmatrix, filename = "rrmm_countmatrix_sct.csv", col1_name = "Gene_Name")
+
+# Celltype Metadata
+seu_meta <- FetchData(object = all_me, vars = c("celltype_1"))
+seu_meta <- tibble::rownames_to_column(seu_meta)
+colnames(seu_meta) <- c("cell", "celltype")
+write_csv(seu_meta,"rrmm_celltype_1.csv")
+
+```
+
+
+Write combined human cell atlas SCT count matrix to csv for CellPhoneDB
+```{r eval=FALSE}
+countmatrix <- GetAssayData(object = all_me_hcao, assay = "SCT", slot = "data")
+write_dgCMatrix_csv(countmatrix, filename = "me_hcao_countmatrix_sct.csv", col1_name = "Gene_Name")
+
+# Celltype Metadata
+seu_meta <- FetchData(object = all_me_hcao, vars = c("celltype_1"))
+seu_meta <- tibble::rownames_to_column(seu_meta)
+colnames(seu_meta) <- c("cell", "celltype")
+write_csv(seu_meta,"me_hcao_celltype_1.csv")
+
+```
+
+Run CellPhoneDB for the separate datasets: 
+RRMM
+```{bash eval=FALSE}
+cellphonedb method statistical_analysis rrmm_celltype_1.csv rrmm_countmatrix_sct.csv \
+--output-path="TAM_RRMM" \
+--iterations=1000 \
+--threads 64 \
+--counts-data=gene_name
+```
+
+HCA
+```{bash eval=FALSE}
+cellphonedb method statistical_analysis me_hcao_celltype_1.csv me_hcao_countmatrix_sct.csv \
+--output-path="TAM_HCAO" \
+--iterations=1000 \
+--threads 64 \
+--counts-data=gene_name
+```
+
+
+# Preparations of the CellPhoneDB output
+
+```{r}
+signif_means <- c()
+signif_means[["tam"]] <- read_tsv("TAM_RRMM/significant_means.txt",col_types = cols()) 
+#signif_means[["ME_SCT"]] <- read_tsv("../K43R_CellphoneDB/testrun/all/ME_SCT/significant_means.txt",col_types = cols()) 
+
+signif_means[["tam_healthy"]] <- read_tsv("TAM_HCAO/significant_means.txt",col_types = cols()) 
+
+```
+
+```{r}
+unique_colnames <- unique(unlist(map(signif_means,colnames)))
+info_cols <- grep("\\|",unique_colnames,val=T,invert = T)
+```
+
+```{r}
+specific_interactions <- map2(signif_means,names(signif_means),  function(signifs,sample) {
+  signifs %>% 
+    #mutate_at(vars(-info_cols),~(.>0)) %>%  
+    select(-info_cols,pair=interacting_pair) %>% 
+    group_by(pair) %>% 
+    pivot_longer(-pair)  %>% 
+    mutate(Patient=sample) %>% 
+    filter(!is.na(value))
+})
+all_interactions <- do.call(rbind,specific_interactions)%>% filter(!grepl("T_HSP",name))
+all_interactions_sorted <- all_interactions %>%  
+  #filter(!(grepl("PC",name)))  %>% 
+  ungroup() %>% group_by(pair,name) %>%
+  mutate(name1 = paste0(sort(strsplit(name,"\\|")[[1]]),collapse = "|"),
+         pair1 = paste0(strsplit(pair,"_")[[1]][order(strsplit(name,"\\|")[[1]])],collapse = "_")) %>% 
+  mutate(name=name1,pair=pair1) 
+
+all_interactions <- all_interactions %>% group_by(pair) %>% mutate(mean=mean(value)) %>% group_by(name) %>% mutate(rank=dense_rank(dplyr::desc(mean)))
+scaled_interactions <- all_interactions  %>% group_by(name) %>% mutate(val_scale=scale(value,center = F)) %>% mutate(rank=dense_rank(dplyr::desc(val_scale)))
+
+mean_strength <- scaled_interactions %>% filter(Patient %in% c("tam"))%>% group_by(name) %>% #top_n(15,value) %>% 
+  summarise(average_strength=sum(value))
+strength_net <- mean_strength %>% separate(name,into=c("SOURCE","TARGET"),sep="\\|")
+strength_net <- strength_net %>% filter(SOURCE!="PC" & TARGET != "PC")
+
+
+mean_strength_healthy <- scaled_interactions %>% filter(Patient %in% c("tam_healthy"))%>% group_by(name) %>% #top_n(15,value) %>% 
+  summarise(average_strength=sum(value))
+strength_net_healthy <- mean_strength_healthy %>% separate(name,into=c("SOURCE","TARGET"),sep="\\|")
+strength_net_healthy <- strength_net_healthy %>% filter(SOURCE!="PC" & TARGET != "PC")
+
+
+```
+```{r}
+net_background <- strength_net %>% select(SOURCE,TARGET)
+strength_net_rrmm <- strength_net %>% group_by(SOURCE) %>% top_n(4,average_strength)
+strength_net_hca <- strength_net_healthy %>% group_by(SOURCE) %>% top_n(4,average_strength)
+
+join_net <- net_background %>% left_join(strength_net_rrmm,by=c("SOURCE","TARGET")) %>% left_join(strength_net_hca,by=c("SOURCE","TARGET"),suffix = c("_RRMM","_HCA"))
+
+
+
+
+all_nodes <- unique(c(join_net$SOURCE,join_net$TARGET))
+
+net <- graph_from_data_frame(d=join_net, vertices=all_nodes, directed=T) 
+
+net <- set_edge_attr(net,name = "weight_RRMM",value = (ifelse(is.na(E(net)$average_strength_RRMM),0,E(net)$average_strength_RRMM)))
+net <- set_edge_attr(net,name = "weight_HCA",value = (ifelse(is.na(E(net)$average_strength_HCA),0,E(net)$average_strength_HCA)))
+net <- set_edge_attr(net,name = "weight",value = ifelse((E(net)$weight_RRMM == 0 & E(net)$weight_HCA == 0) ,0,1))
+
+net <- set_edge_attr(net,name = "RRMM_1",value = ifelse((E(net)$weight_RRMM == 0) ,0,1))
+net <- set_edge_attr(net,name = "HCA_1",value = ifelse((E(net)$weight_HCA == 0) ,0,1))
+
+
+net <- set_edge_attr(net,name = "color",value = E(net)$red)
+
+
+net <- igraph::simplify(net, remove.multiple = F, remove.loops = T) 
+
+l <- layout_nicely(net)
+netgg <- igraph::as_data_frame(net)%>%   mutate(class = sample(letters[1:3], n(), replace = TRUE))
+
+netgg <- netgg %>% mutate(from=gsub("M2-like","TAM3",gsub("^M1-like","TAM1",gsub("C1q+_M1-like","TAM2",from,fixed = T)))) %>% 
+  mutate(to=gsub("M2-like","TAM3",gsub("^M1-like","TAM1",gsub("C1q+_M1-like","TAM2",to,fixed=T))))
+
+
+
+maxlim <- max(c(E(net)$weight_RRMM,E(net)$weight_HCA),na.rm = T)
+minlim <- 0
+netgg <- as_tbl_graph(netgg) %>% mutate(class = ifelse(name %in% c("TAM1","TAM2","TAM3"),"a_TAM","other"))
+
+
+```
+
+## TAM interactions
+
+## Figure 6 G
+
+Network plot of predicted cellular interactions between immune cell subsets in RRMM. Every cell type is connected to its 4 top interacting cell types based on the sum of interaction strengths. The node size corresponds to the number of connected cell types and the coloring corresponds to the interaction strength. 
+
+```{r fig.width=6,fig.height=5}
+library(patchwork)
+set.seed(1255)
+
+
+strength_rrmm <- strength(netgg, weights = E(netgg)$weight_RRMM)
+strength_hca <- strength(netgg, weights = E(netgg)$weight_HCA)
+
+strength_rrmm <- strength(netgg,weights = E(netgg)$RRMM_1)
+strength_hca <- strength(netgg,weights = E(netgg)$HCA_1)
+minlim_strength <- min(c(strength_rrmm,strength_hca))
+maxlim_strength <- max(c(strength_rrmm,strength_hca))
+
+rrmm <- ggraph(netgg, weights = E(netgg)$RRMM_1) +
+  geom_edge_link2(aes(colour = ifelse(is.na(weight_RRMM), NA, weight_RRMM))) +
+  scale_edge_color_gradient(limits = c(minlim, maxlim),
+                            low = "transparent",
+                            high = "firebrick") +
+  theme_void()  + geom_node_point(aes(size = strength_rrmm)) + 
+  scale_size(limits = c(minlim_strength,maxlim_strength),range = c(0.1,4)) +
+  geom_node_label(
+    aes(label = name, fill = class),
+    repel = T,
+    label.size = 0.5,
+    size = 2,label.padding = 0.1
+  ) + scale_fill_manual(values=c("#F8766D","#FFFFFF"))  +  labs(caption = "RRMM BM interaction network", edge_color = "Strength of Interaction",size="Connectivity") + guides(fill =
+                                                                                                                                                                FALSE)
+
+rrmm
+
+```
+
+
+## Supplementary Figure S8 G 
+
+Network plot of predicted cellular interactions between immune cell subsets in healthy donors. Every cell type is connected to its 4 top interacting cell types based on the sum of interaction strengths. The node size corresponds to the number of connected cell types and the coloring corresponds to the interaction strength. 
+
+```{r fig.width=6,fig.height=5}
+hca <- ggraph(netgg, weights = E(netgg)$HCA_1) +
+  geom_edge_link2(aes(colour = weight_HCA)) +
+  scale_edge_color_gradient(limits = c(minlim, maxlim),
+                            low = "transparent",
+                            high = "firebrick") +
+  theme_void() + geom_node_point(aes(size = strength_hca)) + 
+  scale_size(limits = c(minlim_strength,maxlim_strength),range = c(0.1,4)) +
+  geom_node_label(
+    aes(
+      label = ifelse(name == "Myeloma", "PC", name),
+      fill = class
+    ),
+    repel = T,
+    label.size = .5,
+    size = 2,label.padding = 0.1
+  ) + scale_fill_manual(values=c("#F8766D","#FFFFFF")) + labs(caption = "HCA BM interaction network",
+           edge_color = "Strength of Interaction",
+           size = "Connectivity") + guides(fill = FALSE)
+
+hca
+```
+
+```{r}
+sessionInfo()
+```
+

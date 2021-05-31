@@ -1,0 +1,242 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r setup}
+library(qs)
+library(Seurat)
+library(writexl)
+library(tidyverse)
+# args = commandArgs(trailingOnly=TRUE)
+# source("../zz_scripts/functions/library.R")   # Load all required Packages
+# print(paste("Processing: Split the Clean object of all patients"))
+# source("../zz_scripts/functions/functions.R") # Project specific Functions
+# source("../zz_scripts/functions/Create_Patient_Annotation.R") # Project specific Functions
+# #plan("multiprocess")
+#options(future.globals.maxSize = 30 * 1024^3)
+
+
+#output_path <- file.path("../02_merged_all")
+
+#patient_table <- readr::read_csv("../patient_table.csv",col_types="ccc")
+#patients <- patient_table %>% select(Patient) %>% unlist() %>% unique() 
+#patient_timepoints <- patient_table %>% select(Patient_Timepoint)  %>% unlist() %>% unique()
+
+```
+
+# Preparing Input filtered RDS file
+Copied K43R_all_clean.rds from stephan - /media/ag-rippe/NGS_Stephan/HIPO2_K43R/Analysis_v3/Combined/Seurat/All_combined/
+
+
+```{r}
+K43R_seu <- qread("K43R_all_2.qs")
+
+```
+
+```{r}
+
+metadata <- K43R_seu@meta.data
+metadata$cellbarcode <- colnames(K43R_seu)
+
+metadata <- metadata %>% mutate(pop_tp = paste(population,timepoint,sep="_"))
+
+
+```
+
+```{r}
+metadata <- metadata %>% 
+  mutate("sample_id"=paste(patient,timepoint,population,sep="-")) %>% 
+  mutate("pid_id"=paste(PID,timepoint,population,sep="-")) 
+  
+```
+
+
+
+```{r}
+K43R_seu <- AddMetaData(K43R_seu,metadata$sample_id,col.name = "sample_id")
+K43R_seu <- AddMetaData(K43R_seu,metadata$pid_id,col.name = "pid_id")
+```
+
+
+```{r}
+functions <- c(quo(mean(`nCount_RNA`)),quo(mean(`nFeature_RNA`)),quo(n()))
+
+
+summarisation <- function(meta,FUN=mean(`nCount_RNA`),pop_tp){
+    #FUN <- enquo(FUN)
+    pop_tp <- enquo(pop_tp)
+    peeps <- unique((select(meta,!!pop_tp)))[[1]]
+    #print(peeps)
+    newpeeps <- paste0(paste0(as.character(rlang::get_expr(FUN)),collapse = "_"),"_",peeps)
+    #print(newpeeps)
+    temp_stat <- meta %>% group_by(patient,!!pop_tp) %>% dplyr::summarise(n=!!FUN) %>% spread(!!pop_tp,n) %>%
+      rename_at(vars(-patient),funs(str_replace(., "^",paste0(as.character(rlang::get_expr(FUN)),"_",collapse = "_"))))
+      
+      
+      #rename(!!newpeeps[1] := !!peeps[1],!!newpeeps[2] := !!peeps[2])
+    temp_stat
+}
+
+
+```
+
+
+```{r}
+metadata <- metadata %>% mutate(pop_tp = paste(population,timepoint,sep="_"))
+
+allobj <- list(metadata %>% summarisation(FUN=functions[[3]],pop_tp = timepoint),
+  metadata %>% summarisation(FUN=functions[[3]],pop_tp = population),
+  metadata %>% summarisation(FUN=functions[[3]],pop_tp = pop_tp),
+  metadata %>% summarisation(FUN=functions[[2]],pop_tp = timepoint),
+  metadata %>% summarisation(FUN=functions[[2]],pop_tp = population),
+  metadata %>% summarisation(FUN=functions[[2]],pop_tp = pop_tp),
+  metadata %>% summarisation(FUN=functions[[1]],pop_tp = timepoint),
+  metadata %>% summarisation(FUN=functions[[1]],pop_tp = population),
+  metadata %>% summarisation(FUN=functions[[1]],pop_tp = pop_tp))
+
+allobj <- lapply(allobj,as.data.frame)
+```
+
+```{r}
+summary_stat <- plyr::join_all(allobj,by="patient",type = "left")
+```
+
+
+```{r}
+stat_all <- metadata %>% group_by(patient) %>% dplyr::summarise("Total cell #"=n())
+    
+stat_sample <-
+  metadata %>% group_by(patient) %>% summarise(
+    "# samples" = length(unique(`orig.ident`)),
+    "T" = length(unique(grep(
+      "_T[0-4]", `orig.ident`, value = T
+    ))),
+    "N" = length(unique(grep(
+      "_N[0-4]|_Z[0-4]", `orig.ident`, value = T
+    ))),
+    "WBM" = length(unique(grep(
+      "_F[0-4]", `orig.ident`, value = T
+    ))),
+    "# time-points" = length(unique(`timepoint`)),
+    "Total cell #"=n(),
+  )
+
+
+
+```
+
+
+```{r}
+summary_table <- left_join(stat_sample,summary_stat,by="patient")
+col_order <- c("patient",
+"# samples",
+"T",
+"N",
+"WBM",
+"# time-points",
+"Total cell #",
+"n_pre",
+"n_post",
+"n_post_2",
+
+"n_Tumor",
+"n_Tumor_pre",
+"n_Tumor_post",
+"n_Tumor_post_2",
+
+"n_ME",
+"n_ME_pre",
+"n_ME_post",
+"n_ME_post_2",
+
+
+"mean__nFeature_RNA_pre",
+"mean__nFeature_RNA_post",
+"mean__nFeature_RNA_post_2",
+
+"mean__nFeature_RNA_ME",
+"mean__nFeature_RNA_ME_pre",
+"mean__nFeature_RNA_ME_post",
+"mean__nFeature_RNA_ME_post_2",
+
+"mean__nFeature_RNA_Tumor",
+"mean__nFeature_RNA_Tumor_pre",
+"mean__nFeature_RNA_Tumor_post",
+"mean__nFeature_RNA_Tumor_post_2",
+
+"mean__nCount_RNA_pre",
+"mean__nCount_RNA_post",
+"mean__nCount_RNA_post_2",
+
+"mean__nCount_RNA_ME",
+"mean__nCount_RNA_ME_pre",
+"mean__nCount_RNA_ME_post",
+"mean__nCount_RNA_ME_post_2",
+
+
+"mean__nCount_RNA_Tumor",
+"mean__nCount_RNA_Tumor_pre",
+"mean__nCount_RNA_Tumor_post",
+"mean__nCount_RNA_Tumor_post_2"
+)
+
+col_rename <- quo(c(
+   "# Tumor Cells"= "n_Tumor",
+  "# ME Cells" = "n_ME"
+))
+summary_table <- summary_table %>% select(col_order) %>% rename( "# Tumor Cells"= "n_Tumor","# ME Cells" = "n_ME") %>% mutate_if(is.numeric, round, 1)
+
+readr::write_excel_csv2(summary_table,"SummaryTable.csv")
+```
+
+
+```{r}
+writexl::write_xlsx(summary_table,"SummaryTable.xlsx")
+```
+
+```{r}
+DimPlot(K43R_seu,group.by = "timepoint",label=T)+NoLegend()
+DimPlot(K43R_seu,group.by = "population",label=T)+NoLegend()
+DimPlot(K43R_seu,group.by = "patient",label=T)+NoLegend()
+
+```
+
+
+
+```{r}
+qsave(K43R_seu,"K43R_all_3.qs",)
+```
+
+
+```{r}
+
+```
+
+```{r}
+K43R_list <- SplitObject(K43R_seu,split.by = "population")
+```
+
+```{r}
+K43R_Tumor_list <- SplitObject(K43R_list$Tumor,split.by = "patient")
+K43R_me_list <- SplitObject(K43R_list$ME,split.by = "sample_id")
+
+```
+
+```{r}
+dir.create("Tumor")
+sapply(names(K43R_Tumor_list),function(sid){
+  qsave(K43R_Tumor_list[[sid]],file = file.path("Tumor",paste0(sid,".qs")),nthreads = 4)
+})
+```
+```{r}
+dir.create("ME")
+sapply(names(K43R_me_list),function(sid){
+  qsave(K43R_me_list[[sid]],file = file.path("ME",paste0(sid,".qs")),nthreads = 4)
+})
+```
+
+```{r}
+qsave(K43R_list$ME,file="K43R_ME_3.qs")
+qsave(K43R_list$Tumor,file="K43R_Tumor_3.qs")
+```
+

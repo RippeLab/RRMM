@@ -1,0 +1,84 @@
+---
+title: "Prepare metadata for GEO submission"
+output: html_notebook
+---
+
+
+```{r setup}
+library(dplyr)
+library(tidyverse)
+library(Seurat)
+library(ggplot2)
+library(sctransform)
+library(qs)
+library(RhpcBLASctl)
+library(ggpointdensity)
+library(viridis)
+library(patchwork)
+library(data.table)
+library(presto)
+library(RColorBrewer)
+library(ComplexHeatmap)
+library(hypeR)
+```
+
+
+
+```{r}
+K43R_all_GEO <- qread(file = "/media/ag-rippe/NGS_Stephan/HIPO2_K43R/Analysis_v3/_Final_Objects/Data_objects/K43R_all_5.qs")
+Mono_CD16 <- qread(file = "/media/ag-rippe/NGS_Stephan/HIPO2_K43R/Analysis_v3/_Final_Objects/Data_objects/HCA_K43R_Mono_CD16.qs")
+
+```
+
+```{r}
+table(K43R_all_GEO$orig.ident)
+```
+
+
+```{r}
+table(K43R_all_GEO$patient)
+```
+
+
+```{r}
+table(K43R_all_GEO$timepoint)
+```
+
+
+
+
+
+```{r fig.width=12, fig.height=6}
+f <- "ITGAM"
+p1 <- DotPlot(K43R_all_GEO, features = f, group.by = "celltype_1")
+p2 <- DotPlot(Mono_CD16, features = f, group.by = "celltype_2")
+
+p1 | p2
+```
+
+
+```{r fig.width=15, fig.height=5}
+f <- "FOLR2"
+p1 <- VlnPlot(K43R_all_GEO, features = f, group.by = "celltype_1") + 
+  theme(legend.position = "none")
+p2 <- VlnPlot(Mono_CD16, features = f, group.by = "celltype_2") 
+
+p1 | p2 + plot_layout(nrow = 1,widths = c(1,0.3))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

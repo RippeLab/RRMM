@@ -1,0 +1,399 @@
+---
+title: "RRMM Cellular Interaction Analysis Figure 4"
+output: html_notebook
+---
+```{r setup}
+suppressPackageStartupMessages({
+library(Seurat)
+library(qs)
+library(scales)
+options(dplyr.summarise.inform = FALSE)
+library(tidyverse)
+library(igraph)
+})
+legend.col <- function(col, lev) {
+  opar <- par
+  
+  n <- length(col)
+  
+  bx <- par("usr")
+  
+  box.cx <- c(bx[2] + (bx[2] - bx[1]) / 1000,
+              bx[2] + (bx[2] - bx[1]) / 1000 + (bx[2] - bx[1]) / 50)
+  box.cy <- c(bx[3], bx[3])
+  box.sy <- (bx[4] - bx[3]) / n
+  
+  xx <- rep(box.cx, each = 2)
+  
+  par(xpd = TRUE)
+  for (i in 1:n) {
+    yy <- c(
+      box.cy[1] + (box.sy * (i - 1)),
+      box.cy[1] + (box.sy * (i)),
+      box.cy[1] + (box.sy * (i)),
+      box.cy[1] + (box.sy * (i - 1))
+    )
+    polygon(xx, yy, col = col[i], border = col[i])
+    
+  }
+  par(new = TRUE)
+  plot(
+    0,
+    0,
+    type = "n",
+    ylim = c(min(lev), max(lev)),
+    yaxt = "n",
+    ylab = "",
+    xaxt = "n",
+    xlab = "",
+    frame.plot = FALSE
+  )
+  axis(
+    side = 4,
+    las = 2,
+    tick = FALSE,
+    line = .25
+  )
+  par <- opar
+}
+```
+
+
+```{r}
+input_folder <- "../K43R_CellphoneDB/by_patient/out"
+all_list <- list.files(input_folder)
+names(all_list) <- all_list
+all_list <- all_list[-grep("ZVNGET",all_list)]
+
+
+
+cellphone_paths <- map(all_list,~file.path(input_folder,.,"out/count_network.txt"))
+suppressMessages(interaction_count_network <- map(cellphone_paths,read_tsv))
+
+avg_no_patient_filter <- 5
+strength_no_patient_filter <- 3
+```
+
+
+
+Create dataframe with all node and edge informations
+```{r}
+all_edge_table <-
+  do.call(rbind, map2(interaction_count_network, names(interaction_count_network), function(countnet, patient) {
+    cbind(patient = patient, countnet) %>%
+      mutate(status = ifelse(grepl("BM[0-9]", patient), "HCA", "RRMM"))
+  })) %>%
+  filter(!((grepl("PC", TARGET) |
+              grepl("PC", SOURCE)) & status == "RRMM")) %>%
+  group_by(status, TARGET) %>%
+  mutate(npat.2 = n_distinct(patient)) %>%
+  group_by(status, SOURCE) %>%
+  mutate(npat.1 = n_distinct(patient)) %>%
+  rowwise() %>%
+  mutate(npat = min(c(npat.1, npat.2))) %>%
+  select(-npat.1, -npat.2)
+
+average_interaction_count <- map(set_names(c("HCA","RRMM")),function(group){
+  average_net_rrmm <- all_edge_table %>% 
+    filter(status==group) %>%
+    ungroup %>%
+    mutate(max_patient=n_distinct(patient)) %>%
+    filter(npat>avg_no_patient_filter) %>%
+    group_by(SOURCE,TARGET) %>% 
+    summarise(average=mean(count),average_with_zero=sum(count)/max(max_patient),sd=sd(count),median=median(count),n=n())  
+})
+
+```
+
+## Strengths
+Read the strengths instead of the number of significant interactions
+
+```{r}
+cellphone_paths <- map(all_list,~file.path(input_folder,.,"out/significant_means.txt"))
+suppressMessages(interaction_list <- map(cellphone_paths,read_tsv))
+unique_colnames <- unique(unlist(map(interaction_list,colnames)))
+info_cols <- grep("\\|",unique_colnames,val=T,invert = T)
+```
+
+````{r}
+specific_interactions <- map2(interaction_list,names(interaction_list),  function(signifs,sample) {
+  signifs %>%  dplyr::select(-all_of(info_cols),pair=interacting_pair) %>% group_by(pair) %>% pivot_longer(-pair)  %>% mutate(Patient=sample) %>% filter(!is.na(value))
+})
+all_interactions <- do.call(rbind,specific_interactions)
+# Filtering the 3 gene interaction pair
+pair_split <- sapply(all_interactions$pair,strsplit,"_")
+lps<- sapply(pair_split,length)
+filter_list <- unique(names(lps[lps==3]))
+
+all_interactions <- all_interactions %>% filter(!pair %in% filter_list)
+
+
+all_interactions_sorted <- all_interactions %>%  
+  mutate(status = ifelse(grepl("BM[0-9]",Patient),"HCA","RRMM")) %>% 
+  filter(!(grepl("PC",name) & status=="RRMM"))  %>% ungroup() %>% group_by(pair,name) %>%
+  mutate(name1 = paste0(sort(strsplit(name,"\\|")[[1]]),collapse = "|"),
+         pair1 = paste0(strsplit(pair,"_")[[1]][order(strsplit(name,"\\|")[[1]])],collapse = "_")) %>% 
+  mutate(name=name1,pair=pair1) %>%
+  group_by(status,name) %>%
+  mutate(npat=n_distinct(Patient))
+  
+
+
+average_interaction_strength <- map(set_names(c("HCA","RRMM")),function(group){
+  out <- 
+  all_interactions_sorted %>% 
+    filter(status == group) %>% 
+    filter(npat>strength_no_patient_filter) %>%
+    ungroup %>%
+    mutate(max_patient=n_distinct(Patient)) %>%
+    group_by(pair,name,status) %>% 
+    summarise(average_strength=sum(value)/max(max_patient),
+              mean_strength=mean(value),
+              median_strength=median(value),
+              sd_strength=sd(value),
+              n_occ=sum(!is.na(value))) %>%
+    group_by(name) %>% 
+    summarise(CT_average_sum = sum(average_strength),CT_mean_sum=sum(mean_strength),CT_median_sum=sum(median_strength),n=mean(n_occ)) 
+
+})
+
+average_interaction_strength <- map(average_interaction_strength,function(average_net){
+  average_net <- average_net %>% separate(name,c("SOURCE","TARGET"),sep = "\\|")
+  average_net <- rbind(average_net,data.frame("SOURCE"=average_net$TARGET,"TARGET"=average_net$SOURCE,average_net %>% select(-TARGET,-SOURCE)))
+  average_net %>% filter(!duplicated(paste(SOURCE,TARGET)))
+})
+
+network_data <- map(set_names(c("HCA","RRMM")),function(group){
+  average_interaction_count[[group]] %>% left_join(average_interaction_strength[[group]],by=c("SOURCE","TARGET")) 
+})
+
+
+network_data$RRMM$TARGET<-ifelse(network_data$RRMM$TARGET=="Mono/Macro_CD16","Mono_CD16",network_data$RRMM$TARGET)
+network_data$RRMM$TARGET<-ifelse(network_data$RRMM$TARGET=="Mono/Macro_CD14","Mono_CD14",network_data$RRMM$TARGET)
+
+```
+
+## Network generation
+## Figure 4E
+Cellular interactions of myeloma tumor cells and BME cell types. Ligand-receptor expression was ordered according to the number of detected interactions. 
+```{r fig.height=6,fig.width=8}
+
+plotlist <- map2(network_data_col[2],"RRMM",function(netdata,name){
+  center_celltype <- ifelse(name=="RRMM","Myeloma","PC")
+  netdata <- netdata %>% filter(SOURCE==center_celltype) %>% filter(TARGET %in% c(rrmm_nodes,"PC"))
+  
+  nodes <- netdata %>% arrange(desc(average)) %>% ungroup() %>% select(TARGET) %>% unique() %>% unlist() %>% unname()
+  net <- graph_from_data_frame(d=netdata, vertices=nodes, directed=F) 
+  net <- set_edge_attr(net,name = "weight",value = E(net)$average)
+  net <- set_edge_attr(net,name = "color",value = E(net)$CT_average_sum)
+
+  net <- simplify(net, remove.multiple = F, remove.loops = T) 
+  l <- layout_as_star(net,center=center_celltype)
+  
+
+netgg <- igraph::as_data_frame(net)%>%   mutate(class = sample(letters[1:3], n(), replace = TRUE))
+
+
+maxlim <- max(c(E(net)$color),na.rm = T)
+minlim <- 0
+netgg <- as_tbl_graph(netgg) %>% mutate(class = ifelse(name=="Myeloma","Myeloma","other"))
+rrmm <- ggraph(net,"star",center="Myeloma") + 
+  geom_edge_link2(aes(colour = color,width=weight)) +  scale_edge_width(range=c(1,3))+
+  scale_edge_color_gradient(limits=c(minlim,maxlim),low="grey",high = "firebrick") +
+  theme_void()+   geom_node_point() + geom_node_label(aes(label=name),repel = F,nudge_y = -0.03,vjust="outward",hjust="outward",label.padding = unit(1.5,"mm"),label.size = 0.5,size=2.5) +  labs(edge_color="Strength of Interaction",edge_width="Number of Interactions")+ guides(fill=FALSE)+ coord_fixed() + expand_limits(x = c(-1.5, 1.5),y = c(-1.5, 1.5))
+
+    
+})
+  
+wrap_plots(plotlist)
+
+```
+
+## Count interaction differences 
+
+```{r}
+count_spec_interactions <- map2(interaction_list,names(interaction_list),  function(signifs,sample) {
+  signifs %>%  mutate_at(vars(-info_cols),~ . > 0 ) %>%  dplyr::select(-all_of(info_cols),pair=interacting_pair) %>% group_by(pair) %>% pivot_longer(-pair)  %>% mutate(Patient=sample) %>% filter(!is.na(value))
+})
+
+count_interactions <- do.call(rbind,count_spec_interactions)
+# Filtering the interaction pair consisting of 3 genes
+pair_split <- sapply(count_interactions$pair,strsplit,"_")
+lps<- sapply(pair_split,length)
+filter_list <- unique(names(lps[lps==3]))
+
+count_interactions <- count_interactions %>% filter(!pair %in% filter_list)
+```
+
+
+
+
+
+```{r}
+count_interactions_sorted <- count_interactions %>%  
+  mutate(status = ifelse(grepl("BM[0-9]",Patient),"HCA","RRMM")) %>% 
+  mutate(name = ifelse(status=="HCA",gsub("PC","Myeloma",name),name)) %>%
+  filter(!(grepl("PC",name) & status=="RRMM"))  %>% ungroup() %>% group_by(pair,name) %>%
+  mutate(name1 = paste0(sort(strsplit(name,"\\|")[[1]]),collapse = "|"),
+         pair1 = paste0(strsplit(pair,"_")[[1]][order(strsplit(name,"\\|")[[1]])],collapse = "_")) %>% 
+  mutate(name=name1,pair=pair1) %>%
+  group_by(status,name) %>%
+  mutate(npat=n_distinct(Patient))
+
+
+```
+
+```{r}
+
+celltypes_filter <- count_interactions_sorted %>% group_by(status,name) %>% summarise(n=n_distinct(Patient)) %>% filter(status == "RRMM" & n>avg_no_patient_filter)
+
+spec_interaction_difference <- count_interactions_sorted %>% filter(name %in% celltypes_filter$name) %>%
+  ungroup() %>% 
+  group_by(pair,name,status) %>% 
+  mutate(npat=n_distinct(Patient)) %>%
+  mutate(npat_max=ifelse(status=="RRMM",19,8)) %>%
+  filter((npat>=strength_no_patient_filter)) %>% 
+  summarise(int_gain=sum(value)>0) %>% 
+  group_by(name,pair) %>% 
+  pivot_wider(c(name,pair),names_from=status,values_from=int_gain)  %>% 
+  mutate(HCA=ifelse(is.na(HCA),FALSE,HCA)) %>%
+  mutate(RRMM=ifelse(is.na(RRMM),FALSE,RRMM)) %>% 
+  group_by(name, pair) %>%
+  summarise(
+    common = (RRMM & HCA),
+    gain = (RRMM & !(HCA)),
+    loss = (HCA & !(RRMM))
+  ) %>% separate(name,c("SOURCE","TARGET"),sep = "\\|")
+
+spec_interaction_difference <-
+  rbind(
+    spec_interaction_difference,
+    data.frame(
+      "SOURCE" = spec_interaction_difference$TARGET,
+      "TARGET" = spec_interaction_difference$SOURCE,
+      spec_interaction_difference %>% select(-TARGET, -SOURCE)
+    )
+  )
+#test <- test %>% filter(!duplicated(paste(SOURCE,TARGET)))
+
+spec_interaction_difference <- spec_interaction_difference %>%
+  group_by(SOURCE,TARGET) %>%
+  summarise(
+    common = sum(common, na.rm = T),
+    gain = sum(gain, na.rm = T),
+    loss = sum(loss, na.rm = T)
+  ) %>%
+  arrange(desc(common))
+
+
+```
+
+# Figure 4 F
+Bar plot of the cumulative number of interactions detected in a given BME cell type in RRMM samples in comparison to healthy donors. Grey, all interactions; red, gained interactions in RRMM; blue, lost interactions in RRMM. Only selected interactions detected in ≥3 patients were included. 
+
+```{r }
+spec_interaction_difference$TARGET<-ifelse(spec_interaction_difference$TARGET=="Mono/Macro_CD16","Mono_CD16",spec_interaction_difference$TARGET)
+spec_interaction_difference$TARGET<-ifelse(spec_interaction_difference$TARGET=="Mono/Macro_CD14","Mono_CD14",spec_interaction_difference$TARGET)
+
+
+
+
+spec_interaction_difference  %>%  filter(SOURCE=="Myeloma") %>% 
+  ggplot(aes(x=reorder(TARGET,dplyr::desc(gain)))) + 
+  geom_bar(aes(y=common+gain),stat="identity",fill="Grey") + 
+  #geom_bar(aes(y=common+loss),stat="identity",fill="Darkgray",width=0.4,position=position_nudge(-0.25)) + 
+  geom_bar(aes(y=gain),stat="identity",fill="Red") + 
+  geom_bar(aes(y=-loss),stat="identity",fill="Blue") +
+  #geom_point(aes(y=common)) + 
+  theme_minimal()+
+  xlab("interacting cell type") +
+  ylab("number of interactions")+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) + 
+  ylim(-20,60) 
+
+ggsave("Interaction_gainsLosses.png",width=8,height=4)
+```
+
+
+
+## Boxplot - Interaction strength in RRMM and healthy individuals
+
+
+```{r}
+average_patient_count <- map(set_names(c("HCA","RRMM")),function(group){
+  all_edge_table %>% filter(status==group) %>% dplyr::rename("Patient"="patient")
+})
+
+average_patient_strength <- map(set_names(c("HCA","RRMM")),function(group){
+  out <- 
+  all_interactions_sorted %>% 
+  #all_interactions_zscored %>% 
+    filter(status == group) %>% 
+    filter(npat>3) %>%
+    ungroup %>%
+    group_by(Patient, name) %>%
+    summarise(
+      mean_strength = sum(value),
+      median_strength = median(value),
+      sd_strength = sd(value),
+      n_occ = sum(!is.na(value))
+    )
+
+})
+
+
+average_patient_strength <- map(average_patient_strength,function(average_net){
+  average_net <- average_net %>% separate(name,c("SOURCE","TARGET"),sep = "\\|")
+  average_net <- rbind(average_net,data.frame("SOURCE"=average_net$TARGET,"TARGET"=average_net$SOURCE,average_net %>% select(-TARGET,-SOURCE)))
+  average_net %>% filter(!duplicated(paste(SOURCE,TARGET)))
+})
+
+```
+
+
+
+```{r}
+network_data_patient <- map(set_names(c("HCA","RRMM")),function(group){
+  average_patient_count[[group]] %>% left_join(average_patient_strength[[group]],by=c("Patient","SOURCE","TARGET")) 
+})
+network_data_patient$HCA <- network_data_patient$HCA %>% mutate(SOURCE=gsub("PC","Myeloma",SOURCE),TARGET=gsub("PC","Myeloma",TARGET))
+network_data_patient <- do.call(rbind,map(set_names(c("HCA","RRMM")),function(group){
+  network_data_patient[[group]] %>% mutate(status=group)
+})
+)
+
+
+```
+
+## Figure S5 A
+```{r fig.width=8,fig.height=5}
+
+network_data_patient$TARGET<-ifelse(network_data_patient$TARGET=="Mono/Macro_CD16","Mono_CD16",network_data_patient$TARGET)
+network_data_patient$TARGET<-ifelse(network_data_patient$TARGET=="Mono/Macro_CD14","Mono_CD14",network_data_patient$TARGET)
+
+
+
+network_data_patient %>% ungroup() %>%
+  filter(TARGET  %in% c(unlist(strsplit(celltypes_filter$name,split="\\|")),"Mono_CD16","Mono_CD14")) %>%
+  filter(grepl("Myeloma",SOURCE)) %>% 
+  ggplot(aes(x=reorder(TARGET,dplyr::desc(mean_strength)))) +
+  geom_boxplot(aes(y=mean_strength,fill=status),position=position_dodge(width=0.7),width=0.6) + 
+  #facet_wrap(vars(TARGET)) +
+  #geom_jitter(aes(y=mean_strength,fill=status,color=status),position=position_dodge(width=1)) + 
+  theme_minimal() +  
+  ylab("Sum of interaction strengths per patient") + 
+  xlab("Interacting cell type") +
+  scale_fill_hue(direction = -1)+
+  theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1)) +
+  theme(legend.title = element_blank())
+
+ggsave("Interaction_Strength.png",height=5,width=8)
+```
+
+
+
+
+```{r}
+sessionInfo()
+```
+

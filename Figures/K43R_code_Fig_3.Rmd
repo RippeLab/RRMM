@@ -1,0 +1,505 @@
+---
+title: "K43R_Fig_3"
+output: html_notebook
+---
+
+
+```{r setup}
+library(dplyr)
+library(tidyverse)
+library(Seurat)
+library(ggplot2)
+library(sctransform)
+library(qs)
+library(RhpcBLASctl)
+library(ggpointdensity)
+library(viridis)
+library(patchwork)
+library(data.table)
+library(presto)
+library(RColorBrewer)
+library(ComplexHeatmap)
+library(circlize)
+library(phylogram)
+library(dendextend) 
+```
+
+
+
+## For InferCNV code (Sup_Fig.2) -> see Nextflow pipeline
+
+
+### for reduced UMAP visualization
+```{r}
+blank <- theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),legend.position="none",
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
+```
+
+
+### Load complete RRMM dataset (all patients, all time-points, BME + PCs) + metadata
+```{r}
+K43R_all <- qread(".../K43R_all_5.qs")
+```
+
+### Filter PCs
+```{r}
+Idents(K43R_all) <- "major_population"
+PCs <- subset(K43R_all, idents = "PCs")
+```
+
+### Subset myeloma cells only (remove nPCs)
+```{r}
+Idents(PCs) <- "celltype_1"
+Myeloma <- subset(PCs, idents= "PC", invert = T) 
+```
+
+
+## Patient RRMM13 only (ID: R1H4HE)
+```{r}
+Idents(K43R_all) <- "patient"
+Tumor_R1H4HE <- subset(K43R_all, idents = "R1H4HE")
+```
+
+
+## Tumor clone analysis
+# CNV analysis to get subclone information
+### Get Dendogram from InferCNV output
+```{r fig.width=4, fig.height=3}
+library(phylogram)
+library(dendextend) 
+infercnv.observations <- ".../R1H4HE/InferCNV_out/infercnv.observations_dendrogram.txt"
+
+# get and visualize the dendrogram
+
+dend <- as.hclust(read.dendrogram(infercnv.observations))
+plot(dend,labels = FALSE,hang = -1,xlab = "scRNA",ylab = "distance")
+```
+
+
+#### Load CNV heatmap
+```{r echo=T}
+
+knitr::include_graphics(".../R1H4HE/InferCNV_out/infercnv.21_denoised.png")
+```
+
+
+
+### Define number of clones by k-means clustering (cut dendrogram)
+```{r fig.width=4, fig.height=3}
+NCLONES <- 6
+
+tp <- color_branches(dend, k = NCLONES)
+plot(tp,leaflab = 'none')
+```
+
+
+
+# only pre time-point
+```{r}
+Idents(Tumor_R1H4HE) <- "timepoint"
+R1H4HE_pre <- subset(Tumor_R1H4HE, idents = "pre")
+```
+
+# Add 1q-gain-score (see vignette for FIg 2)
+```{r}
+df_1q <- df_1q[1]
+genes_1q_up <- as.character(df_1q$gene)
+genes_1q_up <- list(c(genes_1q_up))
+R1H4HE_pre <- AddModuleScore(R1H4HE_pre, features = genes_1q_up, name = "Up_1q_score", assay = "SCT")
+```
+
+
+```{r echo=T,error = F, message = F, warning = F, verbose = F, eval=F}
+blas_set_num_threads(1)
+omp_set_num_threads(1)
+options(future.globals.maxSize=50*1024^3) 
+R1H4HE_pre <- SCTransform(R1H4HE_pre, vars.to.regress = c("percent.mt", "G2M.Score", "S.Score"), verbose = F)
+```
+
+### PCA
+```{r fig.width=4, fig.height=3}
+R1H4HE_pre <- RunPCA(object = R1H4HE_pre, npcs = 50, verbose = FALSE)
+ElbowPlot(object = R1H4HE_pre, ndims = 50)
+```
+
+
+
+#### Clustering etc.
+```{r echo=T,error = F, message = F, warning = F, verbose = F, eval=F}
+R1H4HE_pre <- FindNeighbors(object = R1H4HE_pre, reduction = "pca", dims = 1:10)
+R1H4HE_pre <- FindClusters(R1H4HE_pre, resolution = 1, verbose = F)
+R1H4HE_pre <- RunUMAP(object = R1H4HE_pre, reduction = "pca", dims = 1:10, verbose = F)
+```
+
+
+```{r fig.width=4, fig.height=3}
+library(phylogram)
+library(dendextend) 
+infercnv.observations <- ".../InferCNV_R1H4HE/InferCNV_pre/infercnv.observations_dendrogram.txt"
+
+# get and visualize the dendrogram
+
+dend <- as.hclust(read.dendrogram(infercnv.observations))
+plot(dend,labels = FALSE,hang = -1,xlab = "scRNA",ylab = "distance")
+```
+
+
+```{r echo=T}
+
+knitr::include_graphics(".../InferCNV_R1H4HE/InferCNV_pre/infercnv.png")
+```
+
+#### Adjust number of clusters using k-means clustering
+```{r fig.width=4, fig.height=3}
+NCLONES <- 4
+
+tp <- color_branches(dend, k = NCLONES)
+plot(tp,leaflab = 'none')
+```
+
+```{r}
+g <- cutree(dend,k = NCLONES)
+groups <- data.frame(BARCODE=names(g),#BARCODE=barcodes,
+                     CLONE=as.numeric(g),
+                     stringsAsFactors = F)
+
+names <- as.data.frame(colnames(R1H4HE_pre))
+names(names)[1] <- "Barcode"
+names <- as.vector(as.character(names$Barcode))
+combi_names_sort <- groups[match(names, groups$BARCODE),]
+
+R1H4HE_pre <- AddMetaData(R1H4HE_pre, col.name = "tumor_clone", combi_names_sort$CLONE)
+
+R1H4HE_pre[["tumor_clone"]] <- ifelse(R1H4HE_pre$tumor_clone=="1","R1H4HE_clone_1",as.character(R1H4HE_pre$tumor_clone))
+R1H4HE_pre[["tumor_clone"]] <- ifelse(R1H4HE_pre$tumor_clone=="2","R1H4HE_clone_2",as.character(R1H4HE_pre$tumor_clone))
+R1H4HE_pre[["tumor_clone"]] <- ifelse(R1H4HE_pre$tumor_clone=="3","R1H4HE_clone_3",as.character(R1H4HE_pre$tumor_clone))
+R1H4HE_pre[["tumor_clone"]] <- ifelse(R1H4HE_pre$tumor_clone=="4","R1H4HE_clone_4",as.character(R1H4HE_pre$tumor_clone))
+```
+
+```{r fig.width=9, fig.height=3.6}
+### UMAPs
+#1
+u1<- DimPlot(object = R1H4HE_pre, reduction = 'umap', pt.size = 2.5, label = F, group.by = "seurat_clusters", cols = "Dark2") + 
+  ggtitle("clusters") + 
+  theme(legend.position = "none") + blank
+
+#2
+cells.use <- names(R1H4HE_pre@active.ident[R1H4HE_pre@meta.data$tumor_clone=="R1H4HE_clone_4"])
+
+
+u2 <- DimPlot(object = R1H4HE_pre, reduction = 'umap', pt.size = 2.5, label = F, 
+              cells.highlight = cells.use, sizes.highlight = 2.5, cols.highlight = "black") + 
+  theme(legend.position = "none")+ blank
+
+
+#3
+u3 <- FeaturePlot(object = R1H4HE_pre, features = c("Up_1q_score1"), cols = c("grey", "firebrick"), pt.size = 2.5, min.cutoff = "q70")+ 
+  theme(legend.position = "none")+ blank
+
+
+f1 <- u1 + u2 + u3 + plot_layout(nrow = 1)
+f1
+```
+
+
+
+```{r fig.width=2.5, fig.height=3}
+
+cells.use_3 <- names(R1H4HE_pre@active.ident[R1H4HE_pre@meta.data$Up_1q_score1 > 0.28 ])
+Up <- as.data.frame(cells.use_3)
+Up$class_1q <- "high"
+colnames(Up) <- c("cells", "class")
+
+cells.use_4 <- names(R1H4HE_pre@active.ident[R1H4HE_pre@meta.data$Up_1q_score1 < 0.28 ])
+Down <- as.data.frame(cells.use_4)
+Down$class_1q <- "low"
+colnames(Down) <- c("cells", "class")
+
+class_1q <- rbind(Up, Down)
+class_1q <- tibble::column_to_rownames(class_1q,"cells")
+R1H4HE_pre <- AddMetaData(R1H4HE_pre, col.name = "class_1q", class_1q)
+
+
+v0 <- VlnPlot(R1H4HE_pre, features = "Up_1q_score1", pt.size = 1,
+              group.by = "donor_status", slot = "data", assay = "SCT", sort = F)+ 
+  theme(legend.position = "none") 
+
+df <- v0$data
+
+df <- merge(df, class_1q, by=0, all=TRUE)  ## class_1q info -> see below
+
+p1 <- ggplot(df, aes(x=Up_1q_score1, fill = class)) +
+  geom_histogram(binwidth = 0.01) + 
+  scale_fill_manual(values = c("firebrick","grey")) +
+  geom_vline(data=df, aes(xintercept=0.28),
+             linetype="dashed") +  coord_flip()
+p1
+```
+
+# Plot together with Violinplot
+```{r fig.width=5, fig.height=3.6}
+v1 <- ggplot(df, aes(x=ident, y=Up_1q_score1, fill=ident)) +
+  geom_violin(trim=FALSE) +
+  geom_jitter(position=position_jitter(0.3), size = 1) +
+  geom_hline(yintercept=0.28 , linetype="dashed") +  #use 90th percentile cutoff
+  theme_bw()+ 
+  theme(legend.position = "none") 
+
+
+v0 <- VlnPlot(R1H4HE_pre, features = "Up_1q_score1", pt.size = 1,
+              group.by = "donor_status", slot = "data", assay = "SCT", sort = F)+ 
+  theme(legend.position = "none") 
+
+df <- v0$data
+
+df <- merge(df, class_1q, by=0, all=TRUE) 
+
+p1 <- ggplot(df, aes(x=Up_1q_score1, fill = class)) +
+  geom_histogram(binwidth = 0.01) + 
+  scale_fill_manual(values = c("firebrick","grey")) +
+  geom_vline(data=df, aes(xintercept=0.28),
+             linetype="dashed") +  coord_flip() +
+  theme_bw()
+
+
+
+
+
+f2 <-  v1 + p1 + plot_layout(nrow = 1,widths = c(0.8,1.3))
+f2
+```
+
+
+
+
+
+
+post time-point only
+```{r}
+Idents(Tumor_R1H4HE) <- "timepoint"
+R1H4HE_post <- subset(Tumor_R1H4HE, idents = "post")
+```
+
+
+```{r echo=T,error = F, message = F, warning = F, verbose = F, eval=F}
+blas_set_num_threads(1)
+omp_set_num_threads(1)
+options(future.globals.maxSize=50*1024^3) 
+R1H4HE_post <- SCTransform(R1H4HE_post, vars.to.regress = c("percent.mt", "G2M.Score", "S.Score"), verbose = F)
+```
+
+### PCA
+```{r fig.width=4, fig.height=3}
+R1H4HE_post <- RunPCA(object = R1H4HE_post, npcs = 50, verbose = FALSE)
+ElbowPlot(object = R1H4HE_post, ndims = 50)
+```
+
+
+#### Clustering etc.
+```{r echo=T,error = F, message = F, warning = F, verbose = F, eval=F}
+R1H4HE_post <- FindNeighbors(object = R1H4HE_post, reduction = "pca", dims = 1:10)
+R1H4HE_post <- FindClusters(R1H4HE_post, resolution = 1, verbose = F)
+R1H4HE_post <- RunUMAP(object = R1H4HE_post, reduction = "pca", dims = 1:10, verbose = F)
+```
+
+
+### Get Dendogram from InferCNV output
+```{r fig.width=4, fig.height=3}
+library(phylogram)
+library(dendextend) 
+infercnv.observations <- ".../InferCNV_R1H4HE/InferCNV_post/infercnv.observations_dendrogram.txt"
+
+# get and visualize the dendrogram
+
+dend <- as.hclust(read.dendrogram(infercnv.observations))
+plot(dend,labels = FALSE,hang = -1,xlab = "scRNA",ylab = "distance")
+```
+
+
+```{r echo=T}
+
+knitr::include_graphics(".../InferCNV_R1H4HE/InferCNV_post/infercnv.png")
+```
+
+#### Adjust number of clusters using k-means clustering
+```{r fig.width=4, fig.height=3}
+NCLONES <- 3
+
+tp <- color_branches(dend, k = NCLONES)
+plot(tp,leaflab = 'none')
+```
+
+
+####  Cut tree and generate dataframe with clone info and add to metadata in Seurat Object and visualize by UMAP
+```{r fig.width=12, fig.height=8}
+g <- cutree(dend,k = NCLONES)
+groups <- data.frame(BARCODE=names(g),#BARCODE=barcodes,
+                     CLONE=as.numeric(g),
+                     stringsAsFactors = F)
+
+names <- as.data.frame(colnames(R1H4HE_post))
+names(names)[1] <- "Barcode"
+names <- as.vector(as.character(names$Barcode))
+combi_names_sort <- groups[match(names, groups$BARCODE),]
+
+R1H4HE_post <- AddMetaData(R1H4HE_post, col.name = "tumor_clone", combi_names_sort$CLONE)
+
+R1H4HE_post[["tumor_clone"]] <- ifelse(R1H4HE_post$tumor_clone=="1","R1H4HE_clone_1",as.character(R1H4HE_post$tumor_clone))
+R1H4HE_post[["tumor_clone"]] <- ifelse(R1H4HE_post$tumor_clone=="2","R1H4HE_clone_2",as.character(R1H4HE_post$tumor_clone))
+R1H4HE_post[["tumor_clone"]] <- ifelse(R1H4HE_post$tumor_clone=="3","R1H4HE_clone_3",as.character(R1H4HE_post$tumor_clone))
+
+```
+
+
+### plot relative numbers of 1q clones pre/post treatment
+```{r}
+table(R1H4HE_pre$tumor_clone)
+```
+
+
+```{r}
+table(R1H4HE_post$tumor_clone)
+```
+
+
+```{r fig.width=1.5, fig.height=3}
+rel <- c(0.071, 0.600)
+anno <- c("pre", "post")
+
+df <- as.data.frame(rel, anno)
+df <- tibble::rownames_to_column(df)
+
+p1 <- ggplot(df, aes(y=rel, x=factor(rowname, levels = c("pre", "post")), fill = rowname)) +
+    geom_bar(stat="identity", color = "black")  +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10), panel.background=element_blank()) +
+  xlab("clone") + ylab("Cell fraction") + 
+  theme(legend.position = "none") +
+  scale_fill_manual(values=c("cyan3","yellow3"))
+p1
+```
+
+
+
+
+
+## Subclone dynamics
+
+### Load complete RRMM dataset (all patients, all time-points, BME + PCs) + metadata
+```{r}
+K43R_all <- qread(".../K43R_all.qs")
+```
+
+### Filter PCs
+```{r}
+Idents(K43R_all) <- "major_population"
+PCs <- subset(K43R_all, idents = "PCs")
+```
+
+### Subset myeloma cells only (remove nPCs)
+```{r}
+Idents(PCs) <- "celltype_1"
+Myeloma <- subset(PCs, idents= "PC", invert = T) 
+```
+
+
+
+```{r}
+df <- FetchData(Myeloma, vars = c("PID_new", "tumor_clone", "timepoint", "pid_id", "remission_depth"))
+
+df_2 <- df %>% 
+  group_by(pid_id) %>% 
+  dplyr::count(tumor_clone, timepoint, PID_new, remission_depth) %>% 
+  mutate(prop=prop.table(n))
+
+write.csv(df_2,".../K43R_clone_fractions_treatment.csv")
+
+# --> Calculate clone stability score in excel (Sum(prop(minor))/(prop(major)))/n_clones
+```
+
+
+```{r}
+# Import dataframe pre_post from excel
+df <- read.csv(".../K43R_clone_dynamics_pre_post_2.csv", header = T, sep = ";")
+df <- sapply(df, gsub, pattern = ",", replacement= ".")
+df <- as.data.frame(df)
+df$prop <- as.numeric(as.character(df$prop))
+
+# change order according to avg_dyn_score
+df$PID_new <- factor(df$PID_new, levels = c("RRMM14", "RRMM18", "RRMM11", "RRMM01", "RRMM03", "RRMM07","RRMM06_2",
+                                            "RRMM06_1", "RRMM19_1", "RRMM10", "RRMM16", "RRMM09","RRMM19_2", "RRMM13", "RRMM04", "RRMM15"))
+
+```
+
+
+```{r fig.width=14, fig.height=2.5}
+
+line1 <- ggplot(data=df, aes(x=factor(timepoint, level = c("pre","post")), y=prop, group=tumor_clone)) +
+    geom_line(size=0.5) +
+    geom_point(size=1.5) +
+    facet_wrap(~PID_new, ncol = 16)  + 
+  theme(legend.position = "none") +
+  xlab("") + ylab("CNV clone fraction")+ theme_bw()
+  
+line1 
+
+
+
+```
+
+
+#### Plot clone dynamics
+```{r}
+df <- read.csv(".../K43R_clone_dynamics_scores.csv", header = T, sep = ";")
+df <- sapply(df, gsub, pattern = ",", replacement= ".")
+df <- as.data.frame(df)
+df$avg_dyn_score <- as.numeric(as.character(df$avg_dyn_score))
+```
+
+```{r fig.width=14, fig.height=2.5}
+require(ComplexHeatmap)
+
+col_fun1 = colorRamp2(c(0, 0.5, 1), c("red","white", "blue"))
+
+
+ha = HeatmapAnnotation(df=df$avg_dyn_score, col = list(df=col_fun1))
+df_2 <- t(as.matrix(c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16)))  # dummy heatmap
+Heatmap(df_2,top_annotation=ha, cluster_rows = F, cluster_columns = F)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

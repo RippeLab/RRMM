@@ -1,0 +1,529 @@
+---
+title: "K43R_Fig_1 + Supplementary Fig_1"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r setup}
+library(dplyr)
+library(tidyverse)
+library(Seurat)
+library(ggplot2)
+library(qs)
+library(viridis)
+library(patchwork)
+library(data.table)
+library(ggpointdensity)
+library(RColorBrewer)
+```
+
+
+### for reduced UMAP visualization
+```{r}
+blank <- theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),legend.position="none",
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
+```
+
+
+
+
+### Load complete RRMM dataset (all patients, all time-points, BME + PCs) + metadata
+```{r}
+K43R_all <- qread(".../K43R_all.qs")
+```
+
+
+# "Classical" Seurat normalization only for this visualization, for all other analyses SCT
+```{r}
+K43R_all <- NormalizeData(K43R_all)
+K43R_all <- FindVariableFeatures(K43R_all, selection.method = "vst", nfeatures = 2000)
+K43R_all <- ScaleData(K43R_all, vars.to.regress = c("percent.mt", "G2M.Score", "S.Score"))
+
+```
+
+
+```{r fig.width=4, fig.height=3}
+K43R_all <- RunPCA(object = K43R_all, npcs = 50, verbose = FALSE)
+ElbowPlot(object = K43R_all, ndims = 50)
+```
+
+
+```{r echo=T,error = F, message = F, warning = F, verbose = F, eval=F}
+K43R_all <- FindNeighbors(object = K43R_all, reduction = "pca", dims = 1:50)
+K43R_all <- FindClusters(K43R_all, resolution = 0.4, verbose = F)
+K43R_all <- RunUMAP(object = K43R_all, reduction = "pca", dims = 1:50, verbose = F)
+```
+
+
+#### Visualize
+```{r fig.width=12, fig.height=4}
+p1 <- DimPlot(object = K43R_all, reduction = 'umap', pt.size = 0.0001, label = F, group.by = "PID_new") + 
+  ggtitle("subject") + 
+  scale_color_manual(values=c(
+  "dodgerblue2", 
+  "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "maroon",
+  "black", 
+  "gold1",
+  "skyblue2", 
+  "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "yellow4", # lt orange
+  "gray50", 
+  "khaki2",
+  "#FF7F00", # orange, 
+  "orchid1", 
+  "deeppink1", 
+  "blue1", 
+  "steelblue4",
+  "darkturquoise", 
+  "yellow4", 
+  "yellow3",
+  "darkorange4"
+  ))+
+  theme(legend.position = "none") + blank
+
+
+Idents(K43R_all) <- "celltype_1_predicted"
+cells.use <- names(K43R_all@active.ident[K43R_all@meta.data$celltype_1_predicted=="PC"])
+p2 <- DimPlot(object = K43R_all, reduction = 'umap', pt.size = 0.5, label = F, 
+              cells.highlight = cells.use, sizes.highlight=0.02, cols.highlight = "black") +
+  ggtitle("SingleR prediction")  + 
+  theme(legend.position = "none")+ blank
+
+
+p3 <- FeaturePlot(object = K43R_all, features = "TNFRSF17", cols = c("grey", "firebrick"), pt.size =0.1, min.cutoff = "q1") + 
+  theme(legend.position = "none")+ blank
+
+px <- p1 | p2 | p3
+px
+```
+
+
+
+### Cell number overview
+```{r fig.width=9, fig.height=3}
+df <- FetchData(K43R_all, vars = c("major_population","PID_new"))
+
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>% 
+  group_by(PID_new) %>% 
+  dplyr::count(major_population, PID_new, .drop = F) 
+
+p1 <- ggplot(df_freq, aes(fill=major_population, y=n, x=reorder(PID_new, -n))) + 
+    geom_bar(position="dodge", stat="identity", color="black") +
+  scale_fill_manual(values=c('black',"grey80"))+
+ theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.background=element_blank()) +
+  xlab("Patient") + ylab("Number of cells") + scale_y_continuous(breaks=seq(0,20000,2000))
+p1
+```
+
+
+
+
+### ggpointdensity split by sorting fraction
+```{r fig.width=12, fig.height=4}
+Idents(K43R_all) <- "sorting"
+pos <- subset(K43R_all, idents = "CD138_pos")
+neg <- subset(K43R_all, idents = "CD138_neg")
+WBM <- subset(K43R_all, idents = "WBM")
+
+# get embeddings
+emb1 <- Embeddings(pos, reduction = "umap")
+emb1 <- as.data.frame(emb1)
+
+emb2 <- Embeddings(neg, reduction = "umap")
+emb2 <- as.data.frame(emb2)
+
+emb3 <- Embeddings(WBM, reduction = "umap")
+emb3 <- as.data.frame(emb3)
+
+
+
+p1 <- ggplot(data = emb1, mapping = aes(x=UMAP_1, y = UMAP_2)) +
+  geom_pointdensity() +
+  scale_color_viridis() + 
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + 
+  theme(legend.position = "none")+ blank
+
+p2 <- ggplot(data = emb2, mapping = aes(x=UMAP_1, y = UMAP_2)) +
+  geom_pointdensity() +
+  scale_color_viridis() + 
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + 
+  theme(legend.position = "none")+ blank
+
+p3 <- ggplot(data = emb3, mapping = aes(x=UMAP_1, y = UMAP_2)) +
+  geom_pointdensity() +
+  scale_color_viridis() + 
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + 
+  theme(legend.position = "none") + blank
+
+px <- p2 | p1 | p3
+px
+```
+
+
+
+### Quantify cell populations per sorting fraction
+```{r fig.width=4.5, fig.height=4}
+df <- FetchData(K43R_all, vars = c("sorting","major_celltype"))
+
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>% 
+  group_by(sorting) %>% 
+  dplyr::count(major_celltype,sorting , .drop = F) %>% 
+  mutate(prop=prop.table(n)) %>% 
+  mutate(prop=format(prop,digits=2))
+df_freq$prop <- as.numeric(as.character(df_freq$prop))
+
+p1 <- ggplot(df_freq, aes(fill=major_celltype, y=prop, x=sorting)) + 
+    geom_bar(position="dodge", stat="identity", color="black") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10), panel.background=element_blank()) +
+  xlab("major cell populations") + ylab("Cell fraction") + 
+  scale_fill_manual(values=c("#0072B2", "Firebrick", "#009E73","#56B4E9","#E69F00", "#F0E442"))
+p1
+```
+
+
+### QC metrics
+```{r fig.width=6, fig.height=3}
+p1 <- VlnPlot(K43R_all, features = "nFeature_RNA", pt.size = 0,
+              group.by = "major_celltype", sort = T, log = T, cols = c("Firebrick", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2")) +
+  geom_boxplot(width=.2, outlier.colour=NA, fill= "white", lwd=0.7, fatten =2) +
+  theme(legend.position = "none") +
+  xlab("Major_celltype") + ylab("detected genes per cell") 
+p1$layers[[1]]$aes_params$size = 0.9
+
+p2 <- VlnPlot(K43R_all, features = "nCount_RNA", pt.size = 0,
+              group.by = "major_celltype", sort = T, log = T, cols = c("Firebrick", "#E69F00", "#56B4E9", "#009E73", "#0072B2", "#F0E442")) +
+  geom_boxplot(width=.2, outlier.colour=NA, fill= "white", lwd=0.7, fatten =2) +
+  theme(legend.position = "none") +
+  xlab("Major_celltype") + ylab("detected UMIs per cell") 
+p2$layers[[1]]$aes_params$size = 0.9
+
+p3 <- p1 | p2
+p3
+```
+
+```{r fig.width=12, fig.height=3}
+Idents(K43R_all) <- "major_population"
+p1 <- VlnPlot(K43R_all, features = "nFeature_RNA", pt.size = 0,
+              group.by = "PID_new", idents = "PCs",
+              sort = T, log = T) +
+  geom_boxplot(width=.2, outlier.colour=NA, fill= "white", lwd=0.7, fatten =2) +
+  theme(legend.position = "none") +
+  xlab("Major_celltype") + ylab("detected genes per cell") +
+  scale_fill_viridis(discrete = T)
+p1$layers[[1]]$aes_params$size = 0.9
+
+
+Idents(K43R_all) <- "major_population"
+p2 <- VlnPlot(K43R_all, features = "nCount_RNA", pt.size = 0,
+              group.by = "PID_new", idents = "PCs",
+              sort = T, log = T) +
+  geom_boxplot(width=.2, outlier.colour=NA, fill= "white", lwd=0.7, fatten =2) +
+  theme(legend.position = "none") +
+  xlab("Major_celltype") + ylab("detected UMIs per cell") +
+  scale_fill_viridis(discrete = T)
+p2$layers[[1]]$aes_params$size = 0.9
+
+
+p3 <- p1 | p2
+p3
+```
+
+```{r fig.width=12, fig.height=3}
+Idents(K43R_all) <- "major_population"
+p1 <- VlnPlot(K43R_all, features = "nFeature_RNA", pt.size = 0,
+              group.by = "PID_new", idents = "TME",
+              sort = T, log = T) +
+  geom_boxplot(width=.2, outlier.colour=NA, fill= "white", lwd=0.7, fatten =2) +
+  theme(legend.position = "none") +
+  xlab("Major_celltype") + ylab("detected genes per cell") +
+  scale_fill_viridis(discrete = T, option = "magma")
+p1$layers[[1]]$aes_params$size = 0.9
+
+
+Idents(K43R_all) <- "major_population"
+p2 <- VlnPlot(K43R_all, features = "nCount_RNA", pt.size = 0,
+              group.by = "PID_new", idents = "TME",
+              sort = T, log = T) +
+  geom_boxplot(width=.2, outlier.colour=NA, fill= "white", lwd=0.7, fatten =2) +
+  theme(legend.position = "none") +
+  xlab("Major_celltype") + ylab("detected UMIs per cell") +
+  scale_fill_viridis(discrete = T, option = "magma")
+p2$layers[[1]]$aes_params$size = 0.9
+
+
+p3 <- p1 | p2
+p3
+```
+
+
+
+
+# fresh/frozen controls
+```{r}
+Idents(K43R_all) <- "orig.ident"
+
+#6KLSUS
+P6KLSUS_WBM_fresh <- subset(K43R_all, idents = "6KLSUS_F2_H01")
+P6KLSUS_WBM_fresh[["processing"]] <- "fresh"
+
+P6KLSUS_N_fresh <- subset(K43R_all, idents = "6KLSUS_N2_H01")
+P6KLSUS_N_fresh[["processing"]] <- "fresh"
+
+P6KLSUS_T_fresh <- subset(K43R_all, idents = "6KLSUS_T2_H01")
+P6KLSUS_T_fresh[["processing"]] <- "fresh"
+
+
+P6KLSUS_WBM_frozen <- subset(K43R_all, idents = "6KLSUS_F2_H02")
+P6KLSUS_WBM_frozen[["processing"]] <- "frozen"
+
+P6KLSUS_N_frozen <- subset(K43R_all, idents = "6KLSUS_N2_H02")
+P6KLSUS_N_frozen[["processing"]] <- "frozen"
+
+P6KLSUS_T_frozen <- subset(K43R_all, idents = "6KLSUS_T2_H02")
+P6KLSUS_T_frozen[["processing"]] <- "frozen"
+
+
+#E79WZA
+E79WZA_WBM_fresh <- subset(K43R_all, idents = "E79WZA_F1_H01")
+E79WZA_WBM_fresh[["processing"]] <- "fresh"
+
+E79WZA_N_fresh <- subset(K43R_all, idents = "E79WZA_N1_H01")
+E79WZA_N_fresh[["processing"]] <- "fresh"
+
+E79WZA_T_fresh <- subset(K43R_all, idents = "E79WZA_T1_H01")
+E79WZA_T_fresh[["processing"]] <- "fresh"
+
+
+E79WZA_WBM_frozen <- subset(K43R_all, idents = "E79WZA_F1_H02")
+E79WZA_WBM_frozen[["processing"]] <- "frozen"
+
+E79WZA_N_frozen <- subset(K43R_all, idents = "E79WZA_N1_H02")
+E79WZA_N_frozen[["processing"]] <- "frozen"
+
+E79WZA_T_frozen <- subset(K43R_all, idents = "E79WZA_T1_H02")
+E79WZA_T_frozen[["processing"]] <- "frozen"
+
+
+#PUVQFD
+PUVQFD_WBM_fresh <- subset(K43R_all, idents = "PUVQFD_F1_H01")
+PUVQFD_WBM_fresh[["processing"]] <- "fresh"
+
+PUVQFD_N_fresh <- subset(K43R_all, idents = "PUVQFD_N1_H01")
+PUVQFD_N_fresh[["processing"]] <- "fresh"
+
+PUVQFD_T_fresh <- subset(K43R_all, idents = "PUVQFD_T1_H01")
+PUVQFD_T_fresh[["processing"]] <- "fresh"
+
+
+PUVQFD_WBM_frozen <- subset(K43R_all, idents = "PUVQFD_F1_H02")
+PUVQFD_WBM_frozen[["processing"]] <- "frozen"
+
+PUVQFD_N_frozen <- subset(K43R_all, idents = "PUVQFD_N1_H02")
+PUVQFD_N_frozen[["processing"]] <- "frozen"
+
+PUVQFD_T_frozen <- subset(K43R_all, idents = "PUVQFD_T1_H02")
+PUVQFD_T_frozen[["processing"]] <- "frozen"
+
+
+PUVQFD <- merge(PUVQFD_WBM_fresh, list(PUVQFD_N_fresh, PUVQFD_T_fresh, PUVQFD_WBM_frozen, PUVQFD_N_frozen, PUVQFD_T_frozen))
+E79WZA <- merge(E79WZA_WBM_fresh, list(E79WZA_N_fresh, E79WZA_T_fresh, E79WZA_WBM_frozen, E79WZA_N_frozen, E79WZA_T_frozen))
+P6KLSUS <- merge(P6KLSUS_WBM_fresh, list(P6KLSUS_N_fresh, P6KLSUS_T_fresh, P6KLSUS_WBM_frozen, P6KLSUS_N_frozen, P6KLSUS_T_frozen))
+
+MM_all <- merge(PUVQFD, list(E79WZA, P6KLSUS))
+
+```
+
+
+### Plot QC metrics
+```{r fig.width=8, fig.height=2.5}
+df <- FetchData(MM_all, vars = c("nFeature_RNA", "PID_new", "processing", "percent.mt", "nCount_RNA"))
+
+dodge <- position_dodge(width = 0.8)
+p1 <- ggplot(df, aes(y=nFeature_RNA, x=PID_new)) + 
+    geom_violin(aes(fill=processing),position=dodge, lwd =0.5) +
+    geom_boxplot(aes(group=interaction(processing,PID_new)), 
+            width=0.25, fill="white", position=dodge,
+            outlier.shape=NA) +
+ theme(axis.text.x = element_text(angle = 45, hjust = 1),
+       panel.background=element_blank(), 
+       axis.line = element_line(size = 0.5, colour = "black"), legend.position = "none")+
+  scale_y_continuous(trans = 'log10')
+
+dodge <- position_dodge(width = 0.8)
+p2 <- ggplot(df, aes(y=nCount_RNA, x=PID_new)) + 
+    geom_violin(aes(fill=processing),position=dodge, lwd =0.5) +
+    geom_boxplot(aes(group=interaction(processing,PID_new)), 
+            width=0.25, fill="white", position=dodge,
+            outlier.shape=NA) +
+ theme(axis.text.x = element_text(angle = 45, hjust = 1),
+       panel.background=element_blank(), 
+       axis.line = element_line(size = 0.5, colour = "black"), legend.position = "none") +
+  scale_y_continuous(trans = 'log10')
+
+dodge <- position_dodge(width = 0.8)
+p3 <- ggplot(df, aes(y=percent.mt, x=PID_new)) + 
+    geom_violin(aes(fill=processing),position=dodge, lwd =0.5) +
+    geom_boxplot(aes(group=interaction(processing,PID_new)), 
+            width=0.25, fill="white", position=dodge,
+            outlier.shape=NA) +
+ theme(axis.text.x = element_text(angle = 45, hjust = 1),
+       panel.background=element_blank(), 
+       axis.line = element_line(size = 0.5, colour = "black"), legend.position = "none")
+
+p4 <- p1 | p2| p3
+p4
+```
+
+
+
+
+```{r}
+blas_set_num_threads(1)
+omp_set_num_threads(1)
+options(future.globals.maxSize=50*1024^3) 
+PUVQFD <- SCTransform(PUVQFD, verbose = FALSE)
+
+blas_set_num_threads(1)
+omp_set_num_threads(1)
+options(future.globals.maxSize=50*1024^3) 
+E79WZA <- SCTransform(E79WZA, verbose = FALSE)
+
+blas_set_num_threads(1)
+omp_set_num_threads(1)
+options(future.globals.maxSize=50*1024^3) 
+P6KLSUS <- SCTransform(P6KLSUS, verbose = FALSE)
+
+```
+
+
+```{r}
+PUVQFD <- RunPCA(PUVQFD, npcs = 50)
+ElbowPlot(PUVQFD, ndims = 50)
+
+E79WZA <- RunPCA(E79WZA, npcs = 50)
+ElbowPlot(E79WZA, ndims = 50)
+
+P6KLSUS <- RunPCA(P6KLSUS, npcs = 50)
+ElbowPlot(P6KLSUS, ndims = 50)
+
+
+
+PUVQFD <- FindNeighbors(PUVQFD, reduction = "pca", dims = 1:30)
+PUVQFD <- FindClusters(PUVQFD, resolution = 0.5)
+PUVQFD <- RunUMAP(PUVQFD, dims = 1:30)
+
+E79WZA <- FindNeighbors(E79WZA, reduction = "pca", dims = 1:30)
+E79WZA <- FindClusters(E79WZA, resolution = 0.5)
+E79WZA <- RunUMAP(E79WZA, dims = 1:30)
+
+P6KLSUS <- FindNeighbors(P6KLSUS, reduction = "pca", dims = 1:30)
+P6KLSUS <- FindClusters(P6KLSUS, resolution = 0.5)
+P6KLSUS <- RunUMAP(P6KLSUS, dims = 1:30)
+
+```
+
+
+### Plot by processing (fresh/frozen)
+```{r fig.width=12, fig.height=4}
+p1 <- DimPlot(object = PUVQFD, reduction = 'umap', pt.size = 0.002, label = F, group.by = "processing") +
+ theme(legend.position = "none") +
+  blank
+
+p2 <- DimPlot(object = E79WZA, reduction = 'umap', pt.size = 0.002, label = F, group.by = "processing") +
+ theme(legend.position = "none")+
+  blank
+
+p3 <- DimPlot(object = P6KLSUS, reduction = 'umap', pt.size = 0.002, label = F, group.by = "processing") +
+ theme(legend.position = "none")+
+  blank
+
+p4 <- p1 | p2 | p3
+p4
+```
+
+
+#### PLot by major celltype
+```{r fig.width=12, fig.height=4}
+p1 <- DimPlot(object = PUVQFD, reduction = 'umap', pt.size = 0.002, label = F, group.by = "major_celltype",
+              cols = c("#0072B2", "Firebrick", "#009E73","#56B4E9","#E69F00", "#F0E442")) +
+ theme(legend.position = "none") +
+  blank
+
+p2 <- DimPlot(object = E79WZA, reduction = 'umap', pt.size = 0.002, label = F, group.by = "major_celltype",
+              cols = c("#0072B2", "Firebrick", "#009E73","#56B4E9","#E69F00", "#F0E442")) +
+ theme(legend.position = "none")+
+  blank
+
+p3 <- DimPlot(object = P6KLSUS, reduction = 'umap', pt.size = 0.002, label = F, group.by = "major_celltype",
+              cols = c("#0072B2", "Firebrick", "#009E73","#56B4E9","#E69F00", "#F0E442")) +
+ theme(legend.position = "none")+
+  blank
+
+p4 <- p1 | p2 | p3
+p4
+```
+
+
+
+
+```{r fig.width=5, fig.height=3}
+p1 <- ggplot(PUVQFD@meta.data, aes(x=processing, fill=major_celltype)) + geom_bar(position="fill") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  scale_fill_manual(values=c("#0072B2", "Firebrick", "#009E73","#56B4E9","#E69F00", "#F0E442"))+
+ theme(legend.position = "none", panel.background=element_blank(),axis.title.y=element_blank(),axis.title.x=element_blank())
+
+p2 <- ggplot(E79WZA@meta.data, aes(x=processing, fill=major_celltype)) + geom_bar(position="fill") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  scale_fill_manual(values=c("#0072B2", "Firebrick", "#009E73","#56B4E9","#E69F00", "#F0E442"))+
+ theme(legend.position = "none", panel.background=element_blank(),axis.title.y=element_blank(),axis.title.x=element_blank())
+
+p3 <- ggplot(P6KLSUS@meta.data, aes(x=processing, fill=major_celltype)) + geom_bar(position="fill") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  scale_fill_manual(values=c("#0072B2", "Firebrick", "#009E73","#56B4E9","#E69F00", "#F0E442"))+
+ theme( panel.background=element_blank(),axis.title.y=element_blank(),axis.title.x=element_blank())
+
+
+p4 <- p1 | p2 | p3
+p4
+```
+
+
+
+### Plot correlation of average gene expression levels in PCs of RRMM12
+```{r fig.width=4, fig.height=4}
+library(ggplot2)
+library(cowplot)
+theme_set(theme_cowplot())
+Idents(PUVQFD) <- "major_celltype"
+PCs <- subset(PUVQFD, idents = "PCs")
+Idents(PCs) <- "processing"
+avg.PCs <- log1p(AverageExpression(PCs, verbose = FALSE)$SCT)
+
+p1 <- ggplot(avg.PCs, aes(fresh, frozen)) + 
+  geom_point() + 
+  ggtitle("PCs RRMM12") +
+  stat_cor(method = "pearson")
+p1
+
+```
+
+
+

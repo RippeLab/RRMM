@@ -1,0 +1,1074 @@
+---
+title: "K43R_Fig_4 + Supplementary Fig. 4"
+output: html_notebook
+---
+
+
+```{r setup}
+library(dplyr)
+library(tidyverse)
+library(Seurat)
+library(ggplot2)
+library(sctransform)
+library(qs)
+library(RhpcBLASctl)
+library(ggpointdensity)
+library(viridis)
+library(patchwork)
+library(data.table)
+library(presto)
+library(RColorBrewer)
+library(ComplexHeatmap)
+
+```
+
+
+
+For interaction analyses (CellPhoneDB) --> see independent file
+
+
+### Load HCA and RRMM datasets
+```{r}
+# load HCA dataset (data can be downloaded here: https://data.humancellatlas.org/explore/projects/cc95ff89-2e68-4a08-a234-480eca21ce79)
+# optional: remove nPCs before integration, can be also done afterwards
+HCA.integrated_2 <- qread(file = ".../HCA.integrated.qs") 
+
+# load RRMM dataset
+
+### Load complete RRMM dataset (all patients, all time-points, BME + PCs) + metadata
+K43R_all <- qread("/K43R_all.qs")
+
+
+### Filter ME cells (CD138 negative fraction)
+Idents(K43R_all) <- "major_population"
+PCs <- subset(K43R_all, idents = "TME")
+DefaultAssay(K43R_all) <- "RNA"
+
+HCA_K43R_ME_rPCA <- merge(K43R_all, HCA.integrated_2)
+```
+
+
+```{r}
+#### Split Object at level that will be integrated
+HCA_K43R_ME_rPCA.list <- SplitObject(HCA_K43R_ME_rPCA, split.by = "sample_id")
+
+names(HCA_K43R_ME_rPCA.list)[c(35, 37)]   # check numbers of Reference datasets to integrate (BM1 + BM3)
+```
+
+```{r}
+#### and normalize each sample with scTransform (requires a lot of RAM >300GB optimal)
+blas_set_num_threads(1)
+omp_set_num_threads(1) 
+options(future.globals.maxSize=50*1024^3)
+suppressWarnings(HCA_K43R_ME_rPCA.list <-lapply(X = HCA_K43R_ME_rPCA.list, FUN = function(x) {
+  x <- SCTransform(x, verbose = FALSE)
+}))
+```
+
+```{r}
+# prepare integration of datasets
+HCA_K43R_ME_rPCA.features <- SelectIntegrationFeatures(object.list = HCA_K43R_ME_rPCA.list, nfeatures = 3000)
+
+HCA_K43R_ME_rPCA.list <- PrepSCTIntegration(object.list = HCA_K43R_ME_rPCA.list, anchor.features = HCA_K43R_ME_rPCA.features)
+
+HCA_K43R_ME_rPCA.list <- lapply(X = HCA_K43R_ME_rPCA.list, FUN = RunPCA, verbose = FALSE, features = HCA_K43R_ME_rPCA.features)
+
+HCA_K43R_ME_rPCA.anchors <- FindIntegrationAnchors(object.list = HCA_K43R_ME_rPCA.list, anchor.features = HCA_K43R_ME_rPCA.features, 
+                                                 normalization.method = "SCT", reduction = "rpca", reference = c(35,37)) #BM1 + BM3
+
+# integrate data 
+HCA_K43R_ME_rPCA.integrated <- IntegrateData(anchorset = HCA_K43R_ME_rPCA.anchors, normalization.method = "SCT", dims = 1:50)
+
+DefaultAssay(HCA_K43R_ME_rPCA.integrated) <- "integrated" 
+HCA_K43R_ME_rPCA.integrated <- RunPCA(HCA_K43R_ME_rPCA.integrated, verbose = FALSE, npcs = 100)
+
+ 
+HCA_K43R_ME_rPCA.integrated <- FindNeighbors(HCA_K43R_ME_rPCA.integrated, reduction = "pca", dims = 1:70) 
+HCA_K43R_ME_rPCA.integrated <- FindClusters(HCA_K43R_ME_rPCA.integrated, resolution = 2) 
+HCA_K43R_ME_rPCA.integrated <- RunUMAP(HCA_K43R_ME_rPCA.integrated, dims = 1:70)   
+```
+
+```{r}
+### cell type annotation has been performed in 3 subsets
+Idents(HCA_K43R_ME_rPCA.integrated) <- "major_celltype"
+
+HCA_K43R_ME_rPCA_myeloid_1 <- subset(HCA_K43R_ME_rPCA.integrated, idents = "Myeloid")
+
+HCA_K43R_ME_rPCA_T_NK_1 <- subset(HCA_K43R_ME_rPCA.integrated, idents = c("T_NK"))
+
+HCA_K43R_ME_rPCA_Pro_B_Er_1 <- subset(HCA_K43R_ME_rPCA.integrated, idents = c("Pro", "B", "Er"))
+
+## generates -> HCA_K43R_ME_rPCA.integrated_2
+```
+
+
+#### remove PCs first if it hasn´t been done yet
+```{r}
+Idents(HCA_K43R_ME_rPCA.integrated_2) <- "celltype_1"
+HCA_K43R_ME_rPCA.integrated_2 <- subset(HCA_K43R_ME_rPCA.integrated_2, idents = "PC", invert = T)
+```
+
+
+#### Change levels for better visualization
+```{r fig.width=6, fig.height=5}
+order <- as.vector(c("T_CD4_naive", "T_CD4_mem", "Th17", "Treg","T_cycling",
+                              "T_CD8_naive", "T_CD8_mem","T_CD8_mem_ck", "T_CD8_tox",
+                              "gdT","NKT","NK_dim","NK_bright",
+                              "CLP","ProB","PreB","B_im","B",
+                              "MkP","ERP","Er",
+                              "HSC","MPP","prMa", "GMP",
+                              "prMono","Mono/Macro_CD14","Mono/Macro_CD16",
+                              "preDC","pDC","cDC1", "cDC2")) 
+order <- rev(order)
+
+Idents(HCA_K43R_ME_rPCA.integrated_2) <- "celltype_1"
+levels(HCA_K43R_ME_rPCA.integrated_2) <- order
+                                           
+df <- as.data.frame(HCA_K43R_ME_rPCA.integrated_2@active.ident)
+HCA_K43R_ME_rPCA.integrated_2 <- AddMetaData(HCA_K43R_ME_rPCA.integrated_2, col.name = "celltype_1", metadata = df)
+
+DimPlot(object = HCA_K43R_ME_rPCA.integrated_2, reduction = 'umap', pt.size = 0.0001, label = F, group.by = "celltype_1") +
+  theme(legend.position = "none")
+```
+
+
+
+
+
+## Dotplot for key markers
+```{r fig.width=11, fig.height=7}
+
+order <- as.vector(c("T_CD4_naive", "T_CD4_mem", "Th17", "Treg","T_cycling","T_CD8_naive", "T_CD8_mem","T_CD8_mem_ck", "T_CD8_tox", "gdT","NKT",
+                     "NK_dim","NK_bright",
+                     "Er","ERP",
+                     "MkP","HSC","MPP","prMa", "GMP","CLP",
+                     "ProB","PreB","B_im","B",
+                     "prMono","Mono/Macro_CD14","Mono/Macro_CD16",
+                     "preDC","pDC","cDC1", "cDC2")) 
+
+
+Idents(HCA_K43R_ME_rPCA.integrated_2) <- "celltype_1"
+levels(HCA_K43R_ME_rPCA.integrated_2) <- order
+                                           
+df <- as.data.frame(HCA_K43R_ME_rPCA.integrated_2@active.ident)
+HCA_K43R_ME_rPCA.integrated_2 <- AddMetaData(HCA_K43R_ME_rPCA.integrated_2, col.name = "celltype_1", metadata = df)
+
+DefaultAssay(HCA_K43R_ME_rPCA.integrated_2) <- "SCT"
+p1 <- DotPlot(HCA_K43R_ME_rPCA.integrated_2, dot.scale = 5,
+         features = c("CD3D","CD3E","CD40LG","CD8A", "CCR7", "IL7R","KLRB1", "IL2RA", "MKI67","LEF1",
+                                       "GZMK", "CCL3", "GZMH", "TRDC",
+                                       "KLRC2", "NCAM1","FCER1G",
+                                       "AHSP","SLC40A1",  "PF4","AVP","SPINK2",
+                                       "TPSB2", "ELANE","ADA","VPREB1", "CD24", "NEIL1", "MS4A1",
+                                       "RETN", "CD14", "FCGR3A",
+                                       "IGLL1", "CLEC4C", "CLEC9A", "CLEC10A"), dot.min = 0.033) + 
+  
+  RotatedAxis()+ 
+  scale_color_gradient( low="blue",high="red") +
+  theme(axis.text.x = element_text(size=9))+
+  theme(axis.text.y = element_text(size=12))
+p1
+```
+
+
+
+
+### Make ggpointdensityplot to visualize major changes in celltype abundances
+```{r fig.width=13, fig.height=5}
+Idents(HCA_K43R_ME_rPCA.integrated_2) <- "donor_status"
+K43R_ME <- subset(HCA_K43R_ME_rPCA.integrated_2, idents = "RRMM")
+emb_K43R <- Embeddings(K43R_ME, reduction = "umap")
+emb_K43R <- as.data.frame(emb_K43R)
+
+
+HCA_ME <- subset(HCA_K43R_ME_rPCA.integrated_2, idents = "healthy")
+emb_HCA <- Embeddings(HCA_ME, reduction = "umap")
+emb_HCA <- as.data.frame(emb_HCA)
+
+p1 <- ggplot(data = emb_K43R, mapping = aes(x=UMAP_1, y = UMAP_2)) +
+  geom_pointdensity() +
+  scale_color_viridis() +
+  theme_bw() +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank()) +
+  ggtitle("RRMM")
+
+p2 <- ggplot(data = emb_HCA, mapping = aes(x=UMAP_1, y = UMAP_2)) +
+  geom_pointdensity() +
+  scale_color_viridis() +
+  theme_bw() +
+  theme(axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank()) +
+  ggtitle("HCA (healthy)")
+  
+p3 <- p2 + p1
+p3
+
+```
+
+
+### Visualize major cell types
+```{r fig.width=5.5, fig.height=5}
+p1 <- DimPlot(object = HCA_K43R_ME_rPCA.integrated_2, reduction = 'umap', pt.size = 0.0001, label = F, 
+        group.by = "major_celltype",cols = c("#0072B2", "Firebrick", "#009E73","#E69F00", "#F0E442")) +
+  theme(legend.position = "none")
+
+p1 
+```
+
+
+
+```{r fig.width=14, fig.height=2.5}
+p1 <- FeaturePlot(object = HCA_K43R_ME_rPCA.integrated_2,  features = c("CD3D"), 
+            cols = c("grey", "firebrick"), pt.size =0.005, min.cutoff = "q10", order = F) + blank
+
+p2 <- FeaturePlot(object = HCA_K43R_ME_rPCA.integrated_2,  features = c("CD79A"), 
+            cols = c("grey", "firebrick"), pt.size =0.005, min.cutoff = "q10", order = F) + blank
+
+p3 <- FeaturePlot(object = HCA_K43R_ME_rPCA.integrated_2,  features = c("HBB"),
+            cols = c("grey", "firebrick"), pt.size =0.005, min.cutoff = "q10", order = F) + blank
+
+p4 <- FeaturePlot(object = HCA_K43R_ME_rPCA.integrated_2,  features = c("CST3"), 
+            cols = c("grey", "firebrick"), pt.size =0.005, min.cutoff = "q10", order = F) + blank
+
+p5 <- FeaturePlot(object = HCA_K43R_ME_rPCA.integrated_2,  features = c("SPINK2"), 
+            cols = c("grey", "firebrick"), pt.size =0.005, min.cutoff = "q10", order = F) + blank
+
+p6 <- FeaturePlot(object = HCA_K43R_ME_rPCA.integrated_2,  features = c("CD7"), 
+            cols = c("grey", "firebrick"), pt.size =0.005, min.cutoff = "q10", order = F) + blank
+
+p7 <- p1 | p2 | p3 | p4 | p5 | p6
+p7
+```
+
+
+
+
+### Plot relative cell type abundnces (HCA vs RRMM)
+```{r fig.width=10, fig.height=5}
+order <- as.vector(
+  c("T_CD4_naive", "T_CD4_mem","T_CD8_naive", "T_CD8_tox", "T_CD8_mem","NK_dim", "Th17","T_CD8_mem_ck", "Treg","gdT","NKT", "NK_bright","T_cycling",
+  "B","PreB","B_im","ProB",
+  "Mono/Macro_CD14","prMono", "cDC2","Mono/Macro_CD16","pDC","cDC1",   
+  "GMP","MPP","ERP","HSC","preDC","CLP","MkP","prMa",
+  "Er")) 
+order <- rev(order)
+
+Idents(HCA_K43R_ME_rPCA.integrated_2) <- "celltype_1"
+levels(HCA_K43R_ME_rPCA.integrated_2) <- order
+                                           
+df_levels <- as.data.frame(HCA_K43R_ME_rPCA.integrated_2@active.ident)
+HCA_K43R_ME_rPCA.integrated_2 <- AddMetaData(HCA_K43R_ME_rPCA.integrated_2, col.name = "celltype_1", metadata = df_levels)
+
+df <- FetchData(HCA_K43R_ME_rPCA.integrated_2, vars = c("celltype_1", "donor_status", "hyperdiploidy", 
+                                                        "timepoint", "sample_id", "patient", "treatment_group", "major_celltype", "gain_1q21"))
+```
+
+```{r}
+df_HCA <- df[ which(df$donor_status=="healthy"),]
+df_HCA <- as.data.frame(table(df_HCA$celltype_1))
+setDT(df_HCA)[, frac := Freq / sum(Freq)]
+df_HCA$frac_round <- round(df_HCA$frac, digits = 4)
+
+p1 <- ggplot(data=df_HCA, aes(x = Var1, y=frac_round)) +
+  geom_bar(stat="identity") +
+ theme(axis.text.x = element_text(angle = 0, hjust = .5)) +
+  xlab("Celltype") + ylab("Fraction of cells") + 
+  geom_text(label = df_HCA$frac_round, size=3, position = position_nudge(y = 0.015)) +
+  theme(legend.position = "none") + 
+  ggtitle("Healthy")
+p1 <- p1 + coord_flip() + theme(panel.background = element_blank(), axis.line = element_line(colour = "black"))
+```
+
+```{r fig.width=11, fig.height=5}
+# HCA
+df_HCA <- df[ which(df$donor_status=="healthy"),]
+df_HCA <- as.data.frame(table(df_HCA$celltype_1))
+setDT(df_HCA)[, frac := Freq / sum(Freq)]
+df_HCA$frac_round <- round(df_HCA$frac, digits = 4)
+
+p1 <- ggplot(data=df_HCA, aes(x = Var1, y=frac_round)) +
+  geom_bar(stat="identity") +
+ theme(axis.text.x = element_text(angle = 0, hjust = .5)) +
+  xlab("Celltype") + ylab("Fraction of cells") + 
+  geom_text(label = df_HCA$frac_round, size=3, position = position_nudge(y = 0.015)) +
+  theme(legend.position = "none") + 
+  ggtitle("Healthy")
+p1 <- p1 + coord_flip() + theme(panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+#K43R
+df_K43R <- df[ which(df$donor_status=="RRMM"),]
+df_K43R <- as.data.frame(table(df_K43R$celltype_1))
+setDT(df_K43R)[, frac := Freq / sum(Freq)]
+df_K43R$frac_round <- round(df_K43R$frac, digits = 4)
+
+p2 <- ggplot(data=df_K43R, aes(x = Var1, y=frac_round)) +
+  geom_bar(stat="identity") +
+ theme(axis.text.x = element_text(angle = 0, hjust = .5)) +
+  xlab(NULL) + ylab("Fraction of cells") + 
+  geom_text(label = df_K43R$frac_round, size=3, position = position_nudge(y = 0.015)) +
+  theme(legend.position = "none") + 
+  ggtitle("RRMM")
+p2 <- p2 + coord_flip() + theme(panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+p3 <- p1 + p2
+p3
+
+
+```
+
+
+
+### Relative celltype abundances (boxplot per patient)
+```{r}
+order <- as.vector(
+  c("T_CD4_naive", "T_CD4_mem","T_CD8_naive", "T_CD8_tox", "T_CD8_mem","NK_dim", "Th17","T_CD8_mem_ck", "Treg","gdT","NKT", "NK_bright","T_cycling",
+  "B","PreB","B_im","ProB",
+  "Mono/Macro_CD14","prMono", "cDC2","Mono/Macro_CD16","pDC","cDC1",   
+  "GMP","MPP","ERP","HSC","preDC","CLP","MkP","prMa",
+  "Er")) 
+
+Idents(HCA_K43R_ME_rPCA.integrated_2) <- "celltype_1"
+levels(HCA_K43R_ME_rPCA.integrated_2) <- order
+                                           
+df_levels <- as.data.frame(HCA_K43R_ME_rPCA.integrated_2@active.ident)
+HCA_K43R_ME_rPCA.integrated_2 <- AddMetaData(HCA_K43R_ME_rPCA.integrated_2, col.name = "celltype_1", metadata = df_levels)
+
+df <- FetchData(HCA_K43R_ME_rPCA.integrated_2, vars = c("patient", "celltype_1"))
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>% 
+  group_by(patient) %>% 
+  dplyr::count(celltype_1, patient, .drop = F) %>% 
+  mutate(prop=prop.table(n)) %>% 
+  mutate(prop=format(prop,digits=2))
+df_freq$prop <- as.numeric(as.character(df_freq$prop))
+
+## Remove residual PCs with value 0 (wherever they come from...)
+df_freq <- df_freq[!(df_freq$celltype_1=="PC"),]
+
+## Add column for patient
+#df_freq$patient <- sub("([^-]+).*", "\\1",df_freq$sample_id)
+
+## Add column for donor_status
+df_freq$donor_status <- ifelse(df_freq$patient=="BM1","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM2","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM3","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM4","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM5","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM6","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM7","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM8","healthy",as.character(df_freq$donor_status))
+
+df_freq$donor_status <- ifelse(df_freq$patient=="2FTMUU","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="32ARQL","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="37A66E","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="6K8YTY","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="6KLSUS","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="8YGUU8","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="CSU6UB","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="E79WZA","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="N5CC3E","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="N7ZK3L","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="NUL141","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="PUVQFD","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="R1H4HE","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="R1V8RN","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="TS6ZX9","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="VP6CSY","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="XF2DTB","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="YK554L","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="ZPMZFJ","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="ZVNGET","RRMM",as.character(df_freq$donor_status))
+```
+
+
+```{r fig.width=14, fig.height=4}
+
+require(ggpubr)
+p4 <- ggplot(df_freq, aes(x=factor(donor_status, level = c("healthy", "RRMM")), y=prop)) + 
+  geom_boxplot(outlier.size = 0.4, aes(fill = donor_status)) +
+  facet_wrap(vars(factor(celltype_1, levels = c("T_CD4_naive", "T_CD4_mem","T_CD8_naive", "T_CD8_tox", "T_CD8_mem","NK_dim", "Th17","T_CD8_mem_ck",  
+                                                "Treg","gdT","NKT", "NK_bright","T_cycling",
+                                                "B","B_im","ProB","PreB",
+                                                "Mono/Macro_CD14","prMono", "cDC2","Mono/Macro_CD16","pDC","cDC1",   
+                                                "GMP","MPP","ERP","HSC","preDC","CLP","MkP","prMa",
+                                                "Er"))), 
+             scales = "free_y", ncol = 16) +
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=0.4) +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 6)) +
+  theme(axis.text.x = element_text(size=7))+
+  theme(axis.text.y = element_text(size=5))+ 
+  stat_compare_means(size=2.25)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_fill_manual(values = c("#00BFC4","#F8766D"))+
+  theme(legend.position = "none")
+
+p4 
+
+```
+
+### Plot CLEC4A and CD74 as imoortant markers for myeloid compartment
+```{r fig.width=4, fig.height=4}
+Idents(HCA_K43R_ME_rPCA.integrated_2) <- "celltype_1"
+DefaultAssay(HCA_K43R_ME_rPCA.integrated_2) <- "SCT"
+p1 <- VlnPlot(HCA_K43R_ME_rPCA.integrated_2, features = "CLEC4A", pt.size = 0, slot = "data", group.by = "celltype_1", sort = F, 
+              split.by = "donor_status", split.plot = F, idents = c("Mono/Macro_CD16", "Mono/Macro_CD14", "cDC2"), cols = c("#00BFC4","#F8766D")) +
+  theme(axis.title.x=element_blank()) 
+p1
+```
+
+
+```{r fig.width=4, fig.height=4}
+Idents(HCA_K43R_ME_rPCA.integrated_2) <- "celltype_1"
+DefaultAssay(HCA_K43R_ME_rPCA.integrated_2) <- "SCT"
+p1 <- VlnPlot(HCA_K43R_ME_rPCA.integrated_2, features = "CD74", pt.size = 0, slot = "data", group.by = "celltype_1", sort = F, 
+              split.by = "donor_status", split.plot = F, idents = c("Mono/Macro_CD16", "Mono/Macro_CD14", "cDC2"), cols = c("#00BFC4","#F8766D")) +
+  theme(axis.title.x=element_blank()) 
+p1
+```
+
+### For Sup. Figure 6 (CD68 expression):
+```{r fig.width=10, fig.height=5}
+p1 <- FeaturePlot(object = HCA_K43R_ME_rPCA.integrated_2,  features = c("CD68"), 
+            cols = c("grey", "firebrick"), pt.size =0.005, min.cutoff = "q10", order = F, split.by = "donor_status") + blank
+p1
+```
+
+```{r fig.width=3, fig.height=4}
+Idents(HCA_K43R_ME_rPCA.integrated_2) <- "celltype_1"
+DefaultAssay(HCA_K43R_ME_rPCA.integrated_2) <- "SCT"
+p <- VlnPlot(HCA_K43R_ME_rPCA.integrated_2, features = "CD68", idents = "Mono/Macro_CD16", 
+             split.by = "donor_status", pt.size = 0, cols = c("#00BFC4","#F8766D" )) 
+p
+```
+
+
+
+
+
+### Vizualize key interactions that are specific for RRMM (see code for CellPhoneDB in independent file)
+```{r}
+## Load nPCs of HCA dataset
+nPCs_HCA <- qread(".../HCA_PCs.qs")
+nPCs_HCA[["PID_new"]] <- "nPCs"
+```
+
+
+### Load complete RRMM dataset (all patients, all time-points, BME + PCs) + metadata
+```{r}
+K43R_all <- qread(".../K43R_all.qs")
+```
+
+### Filter PCs
+```{r}
+Idents(K43R_all) <- "major_population"
+PCs <- subset(K43R_all, idents = "PCs")
+```
+
+### Subset myeloma cells only (remove nPCs)
+```{r}
+Idents(PCs) <- "celltype_1"
+Myeloma <- subset(PCs, idents= "PC", invert = T) 
+```
+
+
+```{r}
+PCs_all <- merge(x = nPCs_HCA, y = Myeloma)
+```
+
+
+```{r}
+blas_set_num_threads(1)
+omp_set_num_threads(1)
+options(future.globals.maxSize=50*1024^3) 
+PCs_all <- SCTransform(PCs_all, verbose = FALSE)
+```
+
+
+```{r fig.width=15, fig.height=6.5}
+Idents(PCs_all) <- "PID_new"
+Idents(K43R_ME) <- "celltype_1"
+
+features_PC <- c("MIF",
+                 "COPA", 
+                 "AREG", 
+                "LILRB4",
+                "ALOX5",
+                "BST2",
+                 "GRN",
+                 "HGF", 
+                 "BMP8B",  
+                "CD47",
+                "TNFRSF17", 
+                 "RPS19", 
+                 "LAMP1",
+                 "CCL3", 
+                 "BAG6", 
+                "FAM3C",
+                 "CD48",
+                "GPRC5D",
+                 "IFNGR1", 
+                 "PGRMC2")
+                 
+features_ME <- c("CD74",
+                 "P2RY6",
+                 "ICAM1", 
+                 "LAIR1",
+                 "ALOX5AP", 
+                 "LILRA4", 
+                 "TNFRSF1B", 
+                 "CD44", 
+                 "PLAUR",
+                 "LGALS9",
+                 "TNFSF13B", 
+                 "C5AR1", 
+                 "VSTM1", 
+                 "CCR1", 
+                 "NCR3",
+                 "KIR2DL3",
+                 "CD244",
+                 "CCL4",
+                 "IFNG", 
+                  "CCL4L2")
+
+
+p1 <- DotPlot(PCs_all, features = features_PC, dot.scale = 6) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  coord_flip() + 
+  theme(legend.position = "none") 
+
+p2 <- DotPlot(K43R_ME, features = features_ME, dot.scale = 6) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  coord_flip()+ 
+  theme(legend.position = "none") 
+
+
+p3 <- p1 + p2
+p3
+```
+
+
+
+
+# changes of celltype abundance over treatment
+```{r}
+### Load complete RRMM dataset (all patients, all time-points, BME + PCs) + metadata
+K43R_all <- qread(".../K43R_all.qs")
+
+### Filter ME
+Idents(K43R_all) <- "major_population"
+K43R_ME <- subset(K43R_all, idents = "TME")
+
+# remove patient with only one time-point
+Idents(K43R_all) <- "patient"
+K43R_ME_treatment <- subset(K43R_all, idents = c("32ARQL", "E79WZA", "6KLSUS", "PUVQFD", "TS6ZX9", "XF2DTB"), invert = T)
+
+```
+
+
+
+```{r}
+df <- FetchData(K43R_ME_treatment, vars = c("celltype_1", "PID_sample_new"))
+
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>% 
+  group_by(PID_sample_new) %>% 
+  dplyr::count(celltype_1, PID_sample_new, .drop = F) %>% 
+  mutate(prop=prop.table(n)) %>% 
+  mutate(prop=format(prop,digits=2))
+
+df_freq$prop <- as.numeric(as.character(df_freq$prop))
+
+## Remove residual PCs with value 0 (wherever they come from...)
+df_freq <- df_freq[!(df_freq$celltype_1=="PC"),]
+
+## Add column for timepoint
+df_freq$timepoint <- sub("^[^-]*-([^-]+).*", "\\1",df_freq$PID_sample_new)
+
+## Add column for patient
+df_freq$patient <- sub("([^-]+).*", "\\1",df_freq$PID_sample_new)
+
+
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM01","IMiD",as.character(df_freq$treatment_group))
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM03","MEKi",as.character(df_freq$treatment_group)) #
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM04","PI",as.character(df_freq$treatment_group)) 
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM06","IMiD",as.character(df_freq$treatment_group))
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM07","PI",as.character(df_freq$treatment_group))
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM09","MEKi",as.character(df_freq$treatment_group)) # 
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM10","IMiD",as.character(df_freq$treatment_group)) 
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM11","IMiD",as.character(df_freq$treatment_group))
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM13","PI",as.character(df_freq$treatment_group)) #
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM14","IMiD",as.character(df_freq$treatment_group))
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM15","IMiD",as.character(df_freq$treatment_group))
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM16","MEKi",as.character(df_freq$treatment_group)) #
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM18","IMiD",as.character(df_freq$treatment_group))
+df_freq$treatment_group <- ifelse(df_freq$patient=="RRMM19","IMiD",as.character(df_freq$treatment_group)) 
+
+
+## focus on abundant cell types per patient
+df_freq <- df_freq %>% filter(celltype_1 %in% c("B", "cDC2", "Er", "gdT", "Mono/Macro_CD14", "Mono/Macro_CD16", "NK_bright", "NK_dim", "pDC", "prMono", "T_CD4_mem", "T_CD4_naive", "T_CD8_mem", "T_CD8_mem_ck", "T_CD8_naive", "T_CD8_tox", "Th17", "Treg"))
+
+df_freq <- df_freq %>% filter(n >= 5)
+
+## remove cell types for patients that (after upper criteria) are only left for one time-point
+df_freq <- df_freq %>% filter(!celltype_1 %in% c("B") | !patient %in% c("RRMM01", "RRMM04", "RRMM11", "RRMM16"))
+df_freq <- df_freq %>% filter(!celltype_1 %in% c("Er") | !patient %in% c("RRMM07", "RRMM09", "RRMM10"))
+df_freq <- df_freq %>% filter(!celltype_1 %in% c("NK_bright") | !patient %in% c("RRMM01"))
+df_freq <- df_freq %>% filter(!celltype_1 %in% c("pDC") | !patient %in% c("RRMM01", "RRMM09", "RRMM10"))
+df_freq <- df_freq %>% filter(!celltype_1 %in% c("prMono") | !patient %in% c("RRMM09"))
+df_freq <- df_freq %>% filter(!celltype_1 %in% c("T_CD8_mem_ck") | !patient %in% c("RRMM11"))
+
+
+### subset patients with two timepoints
+df_freq_2tp <- df_freq %>% filter(!patient %in% c("RRMM06", "RRMM19"))
+
+# split the treatment timepoints
+### subset patients with three timepoint individually
+P8Y <-  df_freq %>% filter(patient %in% c("RRMM06"))
+P8Y_1 <-  P8Y %>% filter(timepoint %in% c("pre", "post"))
+P8Y_1$patient <- "RRMM06_1" 
+
+P8Y_2 <-  P8Y %>% filter(timepoint %in% c("post", "post_2"))
+P8Y_2$patient <- "RRMM06_2" 
+P8Y_2$treatment_group <- "MCL1i" 
+P8Y_2$timepoint <- ifelse(P8Y_2$timepoint=="post","pre",as.character(P8Y_2$timepoint)) 
+P8Y_2$timepoint <- ifelse(P8Y_2$timepoint=="post_2","post",as.character(P8Y_2$timepoint)) 
+
+
+PZP <-  df_freq %>% filter(patient %in% c("RRMM19"))
+PZP_1 <-  PZP %>% filter(timepoint %in% c("pre", "post"))
+PZP_1$patient <- "RRMM19_1" 
+
+PZP_2 <-  PZP %>% filter(timepoint %in% c("post", "post_2"))
+PZP_2$patient <- "RRMM19_2" 
+PZP_2$treatment_group <- "PI" 
+
+PZP_2$timepoint <- ifelse(PZP_2$timepoint=="post","pre",as.character(PZP_2$timepoint)) 
+PZP_2$timepoint <- ifelse(PZP_2$timepoint=="post_2","post",as.character(PZP_2$timepoint)) 
+
+
+df_freq_2 <- rbind(df_freq_2tp, P8Y_1, P8Y_2, PZP_1,PZP_2)
+
+## remove celltypes of patients at with 3 timepoints that only have one timepoit  left now
+df_freq_2 <- df_freq_2 %>% filter(!celltype_1 %in% c("prMono") | !patient %in% c("RRMM19_1", "RRMM19_2"))
+df_freq_2 <- df_freq_2 %>% filter(!celltype_1 %in% c("Treg") | !patient %in% c("RRMM19_1", "RRMM19_2"))
+df_freq_2 <- df_freq_2 %>% filter(!celltype_1 %in% c("T_CD8_mem_ck") | !patient %in% c("RRMM19_2"))
+df_freq_2 <- df_freq_2 %>% filter(!celltype_1 %in% c("Th17") | !patient %in% c("RRMM19_2"))
+df_freq_2 <- df_freq_2 %>% filter(!celltype_1 %in% c("T_CD4_mem") | !patient %in% c("RRMM19_2"))
+
+
+
+```
+
+
+### Visualize relative logFC per celltype upon treatment
+```{r fig.width=12, fig.height=4}
+df_freq_2 %>% ungroup() %>% select(patient,celltype_1,timepoint,prop,treatment_group) %>% group_by(patient,celltype_1) %>% 
+  arrange(desc(timepoint)) %>% mutate(logfc = prop/lag(prop)) %>% mutate(logfc=log(logfc)) %>% filter(!is.na(logfc)) %>% 
+  ungroup() %>% arrange(treatment_group) %>% mutate(trtgrp = as.numeric(factor(treatment_group, levels = c("IMiD", "PI", "MEKi", "MCL1i")))) %>% 
+ggplot( aes(y=logfc, x=fct_reorder(patient,trtgrp),fill=treatment_group)) + 
+  geom_bar(position="dodge", stat="identity") +
+  facet_wrap(vars(fct_relevel(celltype_1, level = c("B", 
+                                                    "cDC2", "pDC", "Mono/Macro_CD14", "Mono/Macro_CD16", "prMono",
+                                                    "NK_bright", "NK_dim", "gdT",
+                                                    "T_CD4_mem", "T_CD4_naive", "T_CD8_mem", "T_CD8_mem_ck", "T_CD8_naive", "T_CD8_tox", "Th17", "Treg",
+                                                    "Er"))), scales = "free_x", ncol = 9) +
+  scale_fill_brewer(palette = "Dark2")+
+  theme_bw() +
+  theme(axis.text.x = element_text(size=6))+
+  theme(axis.text.y = element_text(size=5))+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  theme(legend.position = "none")  ->
+p4
+  
+p4 
+```
+
+
+
+### pDC specific analysis
+
+```{r}
+Idents(HCA_K43R_ME_rPCA.integrated_2) <- "celltype_1"
+pDC <- subset(HCA_K43R_ME_rPCA.integrated_2, idents = "pDC")
+```
+
+```{r}
+# remove patients <25 cells (pDCs)
+Idents(pDC) <- "PID_new"
+pDC <- subset(pDC, idents = c("RRMM01", "RRMM09", "RRMM10", "RRMM13", "RRMM17", "RRMM04", "RRMM07", "RRMM11"), invert = T)
+```
+
+
+```{r}
+Idents(pDC) <- "celltype_1"
+DEA_pDC <- FindMarkers(pDC, logfc.threshold = 0.1, 
+                       group.by = "donor_status", subset.ident = "pDC", ident.1 = "RRMM", ident.2 = "healthy", assay = "SCT")
+DEA_pDC <- tibble::rownames_to_column(DEA_pDC,"gene")
+DEA_pDC <- DEA_pDC %>% filter(p_val_adj < 0.05)
+blacklist <- read.table(".../Blacklist_genes_K43R.txt")
+blacklist <- as.vector(blacklist$V1)
+DEA_pDC <- DEA_pDC[ ! DEA_pDC$gene %in% blacklist, ]
+```
+
+```{r fig.width=6, fig.height=5}
+p1 <- EnhancedVolcano(DEA_pDC,
+    lab = DEA_pDC$gene,
+    selectLab = c("IRF8","CXCR4","CLEC4A", "LGALS9", "LGALS1","TNFSF13B", "GPR183", "CCL5",
+              "HMGB1", "HMGB2", "CD68", "CXCR3", "CD300A","IRF7","CD53","PSMB10", "PSMA2","ALOX5AP",
+               "FOSB","IRF4"),
+    labSize = 4,
+    x = 'avg_logFC',
+    y = 'p_val_adj',
+    xlim = c(-0.5, 1),
+    title = NULL,
+    subtitle = NULL,
+    FCcutoff = 0.1,
+    pCutoff=0.05,
+    pointSize = 1.5,
+    axisLabSize = 11,
+    caption = NULL,
+    legendVisible = F,
+    colAlpha = 1/2, 
+    col = c("grey30", "grey30", "grey30", "red2"),
+    gridlines.major = F,
+    gridlines.minor = F,
+    boxedLabels = F,
+    drawConnectors = T
+) 
+
+p1
+```
+
+
+### Plot heatmap for DE genes in pDCs
+```{r}
+Idents(pDC) <- "PID_new"
+levels(pDC) <- c("RRMM08", "RRMM12","RRMM14", "RRMM05", "RRMM18", "RRMM06", "RRMM03", "RRMM19","RRMM15", "RRMM16",
+                 "BM5", "BM3","BM6", "BM4","BM8", "BM1","BM7", "BM2")
+                                           
+df <- as.data.frame(pDC@active.ident)
+pDC <- AddMetaData(pDC, col.name = "PID_new", metadata = df)
+
+
+
+Idents(pDC) <- "PID_new"
+pDC_avg <- AverageExpression(pDC, assays = c("SCT"), return.seurat = T, verbose = F)
+
+```
+
+
+```{r fig.width=8, fig.height=4}
+p1 <- DoHeatmap(pDC_avg, features = DEA_pDC$gene, draw.lines = F, group.bar=T, size=3)+  
+  theme(legend.position = "none") +
+  scale_fill_gradient2( low="blue",high="red", mid = "white")
+
+### clustered custom heatmap with ComplexHeatmap
+require(reshape2)
+df <- p1$data
+df$Cell <- NULL
+df <- dcast(df, Feature ~ Identity, value.var = "Expression")
+df <- tibble::column_to_rownames(df, "Feature")
+df_2 <- as.data.frame(row.names(df))
+df_3 <- tibble::rownames_to_column(df_2)
+df_3 <- df_3 %>% filter(`row.names(df)` %in% c("IRF8","CXCR4","CLEC4A", "LGALS9", "LGALS1","TNFSF13B", "GPR183", "CCL5",
+              "HMGB1", "HMGB2", "CD68", "CXCR3", "CD300A","IRF7","CD53","ALOX5AP",
+               "FOSB","IRF4"))
+nm <- as.numeric(df_3$rowname)
+nm <- sort(nm)
+
+#create heatmap with gene annotations
+ha = rowAnnotation(foo = anno_mark(at = nm, 
+                                   labels = df_2$`row.names(df)`[nm]))
+
+p1 <- ComplexHeatmap::Heatmap(df, rect_gp = gpar(col = "black", lwd = 0.02),right_annotation = ha,
+                              cluster_rows = T, cluster_columns = T)
+p1
+```
+
+### Inflammation and progenitors
+```{r}
+K43R_all_5 <- qread(file = "/K43R_all_5.qs")
+
+Idents(K43R_all_5) <- "major_population"
+K43R_ME_6 <- subset(K43R_all_5, idents = "TME")
+
+```
+
+### add module scores
+```{r}
+Infla_genes <- read.csv("~/Hallmark/HM_Inflammation.txt", header = F)
+Infla_genes <- as.vector(Infla_genes$V1)
+Infla_genes <- list(c(Infla_genes))
+HCA_K43R_ME_rPCA.integrated_2 <- AddModuleScore(HCA_K43R_ME_rPCA.integrated_2, features = Infla_genes, name = "Infla_score")
+
+IL2_genes <- read.csv("~/Hallmark/HM_IL2.txt", header = F)
+IL2_genes <- as.vector(IL2_genes$V1)
+IL2_genes <- list(c(IL2_genes))
+HCA_K43R_ME_rPCA.integrated_2 <- AddModuleScore(HCA_K43R_ME_rPCA.integrated_2, features = IL2_genes, name = "IL2_score")
+
+IL6_genes <- read.csv("~/Hallmark/HM_IL6.txt", header = F)
+IL6_genes <- as.vector(IL6_genes$V1)
+IL6_genes <- list(c(IL6_genes))
+HCA_K43R_ME_rPCA.integrated_2 <- AddModuleScore(HCA_K43R_ME_rPCA.integrated_2, features = IL6_genes, name = "IL6_score")
+
+TGFB_genes <- read.csv("~/Hallmark/HM_TGFB.txt", header = F)
+TGFB_genes <- as.vector(TGFB_genes$V1)
+TGFB_genes <- list(c(TGFB_genes))
+HCA_K43R_ME_rPCA.integrated_2 <- AddModuleScore(HCA_K43R_ME_rPCA.integrated_2, features = TGFB_genes, name = "TGFB_score")
+
+TNFA_genes <- read.csv("~/Hallmark/HM_TNFA.txt", header = F)
+TNFA_genes <- as.vector(TNFA_genes$V1)
+TNFA_genes <- list(c(TNFA_genes))
+HCA_K43R_ME_rPCA.integrated_2 <- AddModuleScore(HCA_K43R_ME_rPCA.integrated_2, features = TNFA_genes, name = "TNFA_score")
+
+IL1_genes <- read.csv("~/PID_IL1.txt", header = F)
+IL1_genes <- as.vector(IL1_genes$V1)
+IL1_genes <- list(c(IL1_genes))
+HCA_K43R_ME_rPCA.integrated_2 <- AddModuleScore(HCA_K43R_ME_rPCA.integrated_2, features = IL1_genes, name = "IL1_score")
+
+#KLF6 target genes from TRRUST database
+KLF6_genes <- c("ASAH1",
+                "ATF3",
+                "CDH1",
+                "CDKN1A",
+                "CERS2",
+                "CGB5",
+                "DAPK2",
+                "IGF1R",
+                "KRT12",
+                "LAMA1",
+                "LTC4S",
+                "NOS2",
+                "PMAIP1",
+                "PSG3",
+                "PSG5",
+                "TFPI2",
+                "TXNIP")
+KLF6_genes <- list(c(KLF6_genes))
+HCA_K43R_ME_rPCA.integrated_2 <- AddModuleScore(HCA_K43R_ME_rPCA.integrated_2, features = KLF6_genes, name = "KLF6_score")
+
+
+Exh_genes <- c("LAG3", "PDCD1", "HAVCR2", "TIGIT", "CD160", "CD244", "CTLA4")
+Exh_genes <- list(c(Exh_genes))
+HCA_K43R_ME_rPCA.integrated_2 <- AddModuleScore(HCA_K43R_ME_rPCA.integrated_2, features = Exh_genes, name = "Exh_score")
+
+Eff_genes <- c("PRF1", "GZMB", "GZMH", "GNLY", "GZMA", "NKG7")
+Eff_genes <- list(c(Eff_genes))
+HCA_K43R_ME_rPCA.integrated_2 <- AddModuleScore(HCA_K43R_ME_rPCA.integrated_2, features = Eff_genes, name = "Eff_score")
+```
+
+
+## healthy as one to reduce size of heatmap
+```{r}
+HCA_K43R_ME_rPCA.integrated_2[["PID_new"]] <- ifelse(HCA_K43R_ME_rPCA.integrated_2$patient=="BM1","BM (healthy)",as.character(HCA_K43R_ME_rPCA.integrated_2$PID_new))
+HCA_K43R_ME_rPCA.integrated_2[["PID_new"]] <- ifelse(HCA_K43R_ME_rPCA.integrated_2$patient=="BM2","BM (healthy)",as.character(HCA_K43R_ME_rPCA.integrated_2$PID_new))
+HCA_K43R_ME_rPCA.integrated_2[["PID_new"]] <- ifelse(HCA_K43R_ME_rPCA.integrated_2$patient=="BM3","BM (healthy)",as.character(HCA_K43R_ME_rPCA.integrated_2$PID_new))
+HCA_K43R_ME_rPCA.integrated_2[["PID_new"]] <- ifelse(HCA_K43R_ME_rPCA.integrated_2$patient=="BM4","BM (healthy)",as.character(HCA_K43R_ME_rPCA.integrated_2$PID_new))
+HCA_K43R_ME_rPCA.integrated_2[["PID_new"]] <- ifelse(HCA_K43R_ME_rPCA.integrated_2$patient=="BM5","BM (healthy)",as.character(HCA_K43R_ME_rPCA.integrated_2$PID_new))
+HCA_K43R_ME_rPCA.integrated_2[["PID_new"]] <- ifelse(HCA_K43R_ME_rPCA.integrated_2$patient=="BM6","BM (healthy)",as.character(HCA_K43R_ME_rPCA.integrated_2$PID_new))
+HCA_K43R_ME_rPCA.integrated_2[["PID_new"]] <- ifelse(HCA_K43R_ME_rPCA.integrated_2$patient=="BM7","BM (healthy)",as.character(HCA_K43R_ME_rPCA.integrated_2$PID_new))
+HCA_K43R_ME_rPCA.integrated_2[["PID_new"]] <- ifelse(HCA_K43R_ME_rPCA.integrated_2$patient=="BM8","BM (healthy)",as.character(HCA_K43R_ME_rPCA.integrated_2$PID_new))
+```
+
+
+## generate heatmap
+```{r, fig.width=7, fig.height=5}
+
+# get average module scores
+p1 <- DotPlot(HCA_K43R_ME_rPCA.integrated_2, features = c("TNFA_score1", "TGFB_score1", "IL6_score1", 
+                                     "IL2_score1", "Infla_score1", "IL1_score1"),group.by = "PID_new")
+df <- p1$data
+df <- df[,3:5]
+df_w <- pivot_wider(df, names_from = id, values_from = avg.exp.scaled)
+df_gsea <- tibble::column_to_rownames(df_w, "features.plot")
+df_gsea <- df_gsea[,order(colnames(df_gsea))]
+df_gsea <- as.matrix(df_gsea)
+
+# get cell type frequencies
+df <- FetchData(HCA_K43R_ME_rPCA.integrated_2, vars = c("celltype_1", "PID_new"))
+df <- df %>% modify_if(is.character, as.factor)
+df_freq <- df %>% 
+  group_by(PID_new) %>% 
+  dplyr::count(celltype_1, PID_new, .drop = F) %>% 
+  mutate(prop=prop.table(n)) %>% 
+  mutate(prop=format(prop,digits=2))
+df_freq$prop <- as.numeric(as.character(df_freq$prop))
+
+df_freq_HSC <- df_freq %>% filter(celltype_1=="HSC")
+df_freq_MPP <- df_freq %>% filter(celltype_1=="MPP")
+df_freq_GMP <- df_freq %>% filter(celltype_1=="GMP")
+df_freq_ERP <- df_freq %>% filter(celltype_1=="ERP")
+df_freq_CLP <- df_freq %>% filter(celltype_1=="CLP")
+
+# generate heatmap annotations
+ha <- HeatmapAnnotation(freq_HSC = anno_barplot(df_freq_HSC$prop),
+                        freq_MPP = anno_barplot(df_freq_MPP$prop),
+                        freq_GMP = anno_barplot(df_freq_GMP$prop),
+                        freq_ERP = anno_barplot(df_freq_ERP$prop),
+                        freq_CLP = anno_barplot(df_freq_CLP$prop))
+
+
+
+ComplexHeatmap::Heatmap(df_gsea, rect_gp = gpar(col = "black", lwd = 0.1), top_annotation = ha, 
+                        column_split = 3, column_title_gp = gpar(fill = c("#F8766D" , "#00BA38","#619CFF"), font = 1:3)) 
+```
+
+
+
+### Associate patients with inflammation class
+```{r}
+K43R_ME_6[["Inflam_status"]] <- "intermediate"
+K43R_ME_6[["Inflam_status"]] <- ifelse(K43R_ME_6$PID_new=="RRMM10","high",as.character(K43R_ME_6$Inflam_status))
+K43R_ME_6[["Inflam_status"]] <- ifelse(K43R_ME_6$PID_new=="RRMM02","high",as.character(K43R_ME_6$Inflam_status))
+K43R_ME_6[["Inflam_status"]] <- ifelse(K43R_ME_6$PID_new=="RRMM15","high",as.character(K43R_ME_6$Inflam_status))
+K43R_ME_6[["Inflam_status"]] <- ifelse(K43R_ME_6$PID_new=="RRMM17","high",as.character(K43R_ME_6$Inflam_status))
+
+K43R_ME_6[["Inflam_status"]] <- ifelse(K43R_ME_6$PID_new=="RRMM08","low",as.character(K43R_ME_6$Inflam_status))
+K43R_ME_6[["Inflam_status"]] <- ifelse(K43R_ME_6$PID_new=="RRMM18","low",as.character(K43R_ME_6$Inflam_status))
+K43R_ME_6[["Inflam_status"]] <- ifelse(K43R_ME_6$PID_new=="RRMM12","low",as.character(K43R_ME_6$Inflam_status))
+K43R_ME_6[["Inflam_status"]] <- ifelse(K43R_ME_6$PID_new=="RRMM11","low",as.character(K43R_ME_6$Inflam_status))
+K43R_ME_6[["Inflam_status"]] <- ifelse(K43R_ME_6$PID_new=="RRMM19","low",as.character(K43R_ME_6$Inflam_status))
+K43R_ME_6[["Inflam_status"]] <- ifelse(K43R_ME_6$PID_new=="RRMM16","low",as.character(K43R_ME_6$Inflam_status))
+K43R_ME_6[["Inflam_status"]] <- ifelse(K43R_ME_6$PID_new=="RRMM05","low",as.character(K43R_ME_6$Inflam_status))
+K43R_ME_6[["Inflam_status"]] <- ifelse(K43R_ME_6$PID_new=="RRMM03","low",as.character(K43R_ME_6$Inflam_status))
+K43R_ME_6[["Inflam_status"]] <- ifelse(K43R_ME_6$PID_new=="RRMM09","low",as.character(K43R_ME_6$Inflam_status))
+
+table(K43R_ME_6$Inflam_status)
+```
+
+
+## generate violin plots for KLF6
+```{r, fig.width=4, fig.height=5}
+Idents(K43R_ME_6) <- "celltype_1"
+
+p1 <- VlnPlot(K43R_ME_6, features = "KLF6", pt.size = 0, slot = "data", group.by = "Inflam_status", idents = "cDC2") +
+  geom_boxplot(width=.15, outlier.colour=NA, fill= "white", lwd=0.5) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) 
+p1$layers[[1]]$aes_params$size = 0.5
+
+p2 <- VlnPlot(K43R_ME_6, features = "KLF6", pt.size = 0, slot = "data", group.by = "Inflam_status", idents = "T_CD8_mem") +
+  geom_boxplot(width=.15, outlier.colour=NA, fill= "white", lwd=0.5) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) 
+p2$layers[[1]]$aes_params$size = 0.5
+
+p3 <- VlnPlot(K43R_ME_6, features = "KLF6", pt.size = 0, slot = "data", group.by = "Inflam_status", idents = "NK_bright") +
+  geom_boxplot(width=.15, outlier.colour=NA, fill= "white", lwd=0.5) 
+p2$layers[[1]]$aes_params$size = 0.5
+
+px <- p1 / p2 / p3
+px
+```
+
+## calculate p-values
+```{r}
+df <- p1$data
+compare_means(KLF6 ~ ident, data = df, method = "kruskal.test")
+
+df <- p2$data
+compare_means(KLF6 ~ ident, data = df, method = "kruskal.test")
+
+df <- p3$data
+compare_means(KLF6 ~ ident, data = df, method = "kruskal.test")
+```
+
+
+## generate violin plots for KLF6 target genes
+```{r, fig.width=4, fig.height=6}
+my_comparisons <- list( c("high", "low"), c("high", "intermediate"), c("intermediate", "low") )
+
+p1 <- VlnPlot(K43R_ME_6, features = "KLF6_score1", pt.size = 0, slot = "data", group.by = "Inflam_status", idents = "cDC2") +
+  geom_boxplot(width=.15, outlier.colour=NA, fill= "white", lwd=0.5) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) 
+p1$layers[[1]]$aes_params$size = 0.5
+
+
+p2 <- VlnPlot(K43R_ME_6, features = "KLF6_score1", pt.size = 0, slot = "data", group.by = "Inflam_status", idents = "T_CD8_mem") +
+  geom_boxplot(width=.15, outlier.colour=NA, fill= "white", lwd=0.5) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) 
+p2$layers[[1]]$aes_params$size = 0.5
+
+p3 <- VlnPlot(K43R_ME_6, features = "KLF6_score1", pt.size = 0, slot = "data", group.by = "Inflam_status", idents = "NK_bright") +
+  geom_boxplot(width=.15, outlier.colour=NA, fill= "white", lwd=0.5) 
+p2$layers[[1]]$aes_params$size = 0.5
+
+
+py <- p1 / p2 / p3
+py
+```
+
+
+## calculate p-values
+```{r}
+df <- p1$data
+compare_means(KLF6_score1 ~ ident, data = df, method = "kruskal.test")
+
+df <- p2$data
+compare_means(KLF6_score1 ~ ident, data = df, method = "kruskal.test")
+
+df <- p3$data
+compare_means(KLF6_score1 ~ ident, data = df, method = "kruskal.test")
+```
+
+
+### DEA of CD14+ Monocytes
+```{r}
+Idents(K43R_ME_6) <- "celltype_1"
+DEA_1 <- FindMarkers(K43R_ME_6, group.by = "Inflam_status", ident.1 = "high", ident.2 = "low", subset.ident = "Mono/Macro_CD14", logfc.threshold = 0.1, only.pos = F)
+DEA_1 <- tibble::rownames_to_column(DEA_1, "gene")
+DEA_1 <- DEA_1 %>% filter(p_val_adj < 0.05)
+```
+
+
+## generate Volcano Plot
+```{r, fig.width=4, fig.height=4}
+p1 <- EnhancedVolcano(DEA_1,
+    lab = DEA_1$gene,
+    selectLab = c("CXCL8", "IL1B", "CCL3", "CXCL2", "CXCL3", "KLF6"),
+    labSize = 4,
+    x = 'avg_logFC',
+    y = 'p_val_adj',
+    xlim = c(-1.3, 2),
+    title = NULL,
+    subtitle = NULL,
+    FCcutoff = 0.1,
+    pCutoff=0.05,
+    pointSize = 1.5,
+    axisLabSize = 11,
+    caption = NULL,
+    colAlpha = 1/2, 
+    col = c("grey30", "grey30", "grey30", "red2"),
+    gridlines.major = F,
+    gridlines.minor = F,
+    boxedLabels = F,
+    drawConnectors = T
+) 
+p1
+```
+
+
+
+
+
+
+
+
+
+

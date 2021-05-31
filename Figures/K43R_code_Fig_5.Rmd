@@ -1,0 +1,772 @@
+---
+title: "K43R_Fig_5 + Supplementary Fig. 5"
+output: html_notebook
+---
+
+
+```{r setup}
+library(dplyr)
+library(tidyverse)
+library(Seurat)
+library(ggplot2)
+library(sctransform)
+library(qs)
+library(RhpcBLASctl)
+library(ggpointdensity)
+library(viridis)
+library(patchwork)
+library(data.table)
+library(presto)
+library(RColorBrewer)
+library(ComplexHeatmap)
+
+```
+
+
+
+### Load HCA and RRMM datasets
+```{r}
+# load HCA dataset (data can be downloaded here: https://data.humancellatlas.org/explore/projects/cc95ff89-2e68-4a08-a234-480eca21ce79)
+# optional: remove nPCs before integration, can be also done afterwards
+HCA.integrated_2 <- qread(file = ".../HCA.integrated.qs") 
+
+# load RRMM dataset
+
+### Load complete RRMM dataset (all patients, all time-points, BME + PCs) + metadata
+K43R_all <- qread("/K43R_all.qs")
+
+
+### Filter ME cells (CD138 negative fraction)
+Idents(K43R_all) <- "major_population"
+PCs <- subset(K43R_all, idents = "TME")
+DefaultAssay(K43R_all) <- "RNA"
+
+HCA_K43R_ME_rPCA <- merge(K43R_all, HCA.integrated_2)
+
+
+### Subset only T/NK cells
+Idents(HCA_K43R_ME_rPCA) <- "major_celltype"
+HCA_K43R_ME_rPCA_T_NK_1 <- subset(HCA_K43R_ME_rPCA, idents = "T_NK")
+
+### Remove NK cells (except NKT)
+Idents(HCA_K43R_ME_rPCA_T_NK_1) <- "celltype_1"
+HCA_K43R_ME_rPCA_T_1 <- subset(HCA_K43R_ME_rPCA_T_NK_1, idents = c("NK_bright", "NK_dim"), invert = T)
+
+
+
+
+```
+
+
+
+```{r}
+
+#### Split Object at level that will be integrated
+HCA_K43R_ME_rPCA_T_1.list <- SplitObject(HCA_K43R_ME_rPCA_T_1, split.by = "sample_id")
+
+
+#### and normalize each sample with scTransform
+blas_set_num_threads(1)
+omp_set_num_threads(1)
+options(future.globals.maxSize=50*1024^3)
+suppressWarnings(HCA_K43R_ME_rPCA_T_1.list <-lapply(X = HCA_K43R_ME_rPCA_T_1.list, FUN = function(x) {
+  x <- SCTransform(x, verbose = FALSE)
+}))
+
+
+# prepare integration of datasets
+HCA_K43R_ME_rPCA_T_1.features <- SelectIntegrationFeatures(object.list = HCA_K43R_ME_rPCA_T_1.list, nfeatures = 3000)
+
+HCA_K43R_ME_rPCA_T_1.list <- PrepSCTIntegration(object.list = HCA_K43R_ME_rPCA_T_1.list, anchor.features = HCA_K43R_ME_rPCA_T_1.features)
+
+HCA_K43R_ME_rPCA_T_1.list <- lapply(X = HCA_K43R_ME_rPCA_T_1.list, FUN = RunPCA, verbose = FALSE, features = HCA_K43R_ME_rPCA_T_1.features)
+
+HCA_K43R_ME_rPCA_T_1.anchors <- FindIntegrationAnchors(object.list = HCA_K43R_ME_rPCA_T_1.list, anchor.features = HCA_K43R_ME_rPCA_T_1.features,
+                                                             normalization.method = "SCT", reduction = "rpca", reference = c(35,36)) #BM1 + BM2
+
+
+# integrate data
+T_only <- IntegrateData(anchorset = HCA_K43R_ME_rPCA_T_1.anchors, normalization.method = "SCT", dims = 1:50)
+
+DefaultAssay(T_only) <- "integrated" 
+T_only <- RunPCA(T_only, verbose = FALSE, npcs = 50)
+
+T_only <- FindNeighbors(T_only, reduction = "pca", dims = 1:50) 
+T_only <- FindClusters(T_only, resolution = 1) 
+T_only <- RunUMAP(T_only, dims = 1:50)   
+
+```
+
+
+```{r fig.width=7, fig.height=6}
+#Plot UMAP
+p2 <- DimPlot(object = T_only, reduction = 'umap', pt.size =0.005, label = T, label.size = 3, group.by = "celltype_1") + 
+  theme(legend.position = "none")
+
+p2
+
+```
+
+```{r fig.width=10, fig.height=5}
+#Plot UMAP
+p2 <- DimPlot(object = T_only, reduction = 'umap', pt.size =0.005, label = F, label.size = 3, split.by ="donor_status", group.by = "donor_status") + 
+  theme(legend.position = "none")
+p2
+```
+
+
+
+#### T-cell subset marker visualization with schex
+```{r fig.width=6, fig.height=5}
+schex_test <- make_hexbin(T_only, nbins = 20, 
+    dimension_reduction = "UMAP")
+```
+
+
+
+```{r fig.width=5, fig.height=6}
+blank <- theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),legend.position="none",
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
+##### Plot on Schex
+gene_id <-"CCR7"
+p1 <- schex::plot_hexbin_feature(schex_test, type="data", feature=gene_id, mod = "SCT",
+    action="mean", xlab="UMAP1", ylab="UMAP2", 
+    title=paste0("Mean of ", gene_id))  +
+  blank
+
+gene_id <-"CD8A"
+p2 <- schex::plot_hexbin_feature(schex_test, type="data", feature=gene_id, mod = "SCT",
+    action="mean", xlab="UMAP1", ylab="UMAP2", 
+    title=paste0("Mean of ", gene_id))+
+  blank
+
+gene_id <-"CD40LG"
+p3 <- schex::plot_hexbin_feature(schex_test, type="data", feature=gene_id, mod = "SCT",
+    action="mean", xlab="UMAP1", ylab="UMAP2", 
+    title=paste0("Mean of ", gene_id))+
+  blank
+
+gene_id <-"KLRB1"
+p4 <- schex::plot_hexbin_feature(schex_test, type="data", feature=gene_id, mod = "SCT",
+    action="mean", xlab="UMAP1", ylab="UMAP2", 
+    title=paste0("Mean of ", gene_id)) +
+  blank
+
+gene_id <-"IL2RA"
+p5 <- schex::plot_hexbin_feature(schex_test, type="data", feature=gene_id, mod = "SCT",
+    action="mean", xlab="UMAP1", ylab="UMAP2", 
+    title=paste0("Mean of ", gene_id))  +
+  blank
+
+gene_id <-"GZMK"
+p6 <- schex::plot_hexbin_feature(schex_test, type="data", feature=gene_id, mod = "SCT",
+    action="mean", xlab="UMAP1", ylab="UMAP2", 
+    title=paste0("Mean of ", gene_id))+
+  blank
+
+gene_id <-"CCL4"
+p7 <- schex::plot_hexbin_feature(schex_test, type="data", feature=gene_id, mod = "SCT",
+    action="mean", xlab="UMAP1", ylab="UMAP2", 
+    title=paste0("Mean of ", gene_id))+
+  blank
+
+gene_id <-"GZMH"
+p8 <- schex::plot_hexbin_feature(schex_test, type="data", feature=gene_id, mod = "SCT",
+    action="mean", xlab="UMAP1", ylab="UMAP2", 
+    title=paste0("Mean of ", gene_id)) +
+  blank
+
+gene_id <-"TRDC"
+p9 <- schex::plot_hexbin_feature(schex_test, type="data", feature=gene_id, mod = "SCT",
+    action="mean", xlab="UMAP1", ylab="UMAP2", 
+    title=paste0("Mean of ", gene_id))  +
+  blank
+
+gene_id <-"KLRC2"
+p10 <- schex::plot_hexbin_feature(schex_test, type="data", feature=gene_id, mod = "SCT",
+    action="mean", xlab="UMAP1", ylab="UMAP2", 
+    title=paste0("Mean of ", gene_id))+
+  blank
+
+gene_id <-"MKI67"
+p12 <- schex::plot_hexbin_feature(schex_test, type="data", feature=gene_id, mod = "SCT",
+    action="mean", xlab="UMAP1", ylab="UMAP2", 
+    title=paste0("Mean of ", gene_id)) +
+  blank
+
+p13 <- suppressWarnings(CombinePlots(list(p1,p2,p3, p4, p5, p6, p7, p8,p9, p10, p12), ncol = 3, legend = NULL))
+p13
+```
+
+
+
+#### Visualize major markers using heatmap (average expression)
+```{r fig.width=4, fig.height=5}
+Idents(T_only) <- "celltype_1"
+levels(T_only) <- c("T_CD4_naive",  "T_CD4_mem" ,"Th17", "Treg", "T_CD8_naive", "T_CD8_mem", "T_CD8_mem_ck",
+                    "T_CD8_tox","NKT", "gdT", "T_cycling")
+df <- as.data.frame(T_only@active.ident)
+T_only <- AddMetaData(T_only, col.name = "celltype_1", metadata = df)
+
+Idents(T_only) <- "celltype_1"
+T_avg <- AverageExpression(T_only, assays = c("SCT"), return.seurat = T, verbose = F)
+
+features = c("CD4","CD40LG",
+             "CCR7","LEF1","FTH1", "IL7R","KLRB1", "IL2RA","FOXP3",
+             "CD8B","CD8A", "GZMK", "CCL4","CCL3", "IFNG","GZMB","PRF1","GNLY",
+             "KLRC2","NCAM1","TRDC","TRGC1", "TRGC2",
+             "MKI67")
+
+
+p1 <- DoHeatmap(T_avg, features = features, draw.lines = F, group.bar=T, size=3, raster = F)+  
+  theme(legend.position = "none") +
+  scale_fill_gradient2( low="blue",high="red", mid = "white")
+require(reshape2)
+p1
+
+```
+
+
+
+### Add  module scores
+```{r}
+# Exhaustion/Inhibitory
+Inh_genes <- c("LAG3", "PDCD1", "HAVCR2", "TIGIT", "CD244", "CTLA4", "VSIR")
+Inh_genes <- list(c(Inh_genes))
+T_only <- AddModuleScore(T_only, features = Inh_genes, name = "Inh_score", assay = "SCT")
+
+# IFNA response
+IFNA_genes <- read.csv(".../Hallmark_INFA_response.txt", header = F)
+IFNA_genes <- as.vector(IFNA_genes$V1)
+IFNA_genes <- list(c(IFNA_genes))
+T_only <- AddModuleScore(T_only, features = IFNA_genes, name = "IFNA_score", assay = "SCT")
+
+
+# IFNG response
+IFNG_genes <- read.csv(".../Hallmark_INFG_response.txt", header = F)
+IFNG_genes <- as.vector(IFNG_genes$V1)
+IFNG_genes <- list(c(IFNG_genes))
+T_only <- AddModuleScore(T_only, features = IFNG_genes, name = "IFNG_score", assay = "SCT")
+
+
+```
+
+
+
+### T_CD8_mem analysis
+
+### T_CD8_mem RRMM vs. healthy
+```{r}
+Idents(T_only) <- "celltype_1"
+DEA_mem <- FindMarkers(T_only, logfc.threshold = 0.1, 
+                       group.by = "donor_status", subset.ident = "T_CD8_mem", ident.1 = "RRMM", ident.2 = "healthy", assay = "SCT")
+DEA_mem <- tibble::rownames_to_column(DEA_mem,"gene")
+DEA_mem <- DEA_mem %>% filter(p_val_adj < 0.05)
+blacklist <- read.table("/media/ag-rippe/NGS_Stephan/General/gene_lists/Blacklist_genes_K43R.txt")
+blacklist <- as.vector(blacklist$V1)
+DEA_mem <- DEA_mem[ ! DEA_mem$gene %in% blacklist, ]
+```
+
+
+```{r fig.width=6, fig.height=5}
+p1 <- EnhancedVolcano(DEA_mem,
+    lab = DEA_mem$gene,
+    selectLab = c("GZMH","GNLY","GZMA", "GZMB", "GZMK","GZMM","PRF1",
+              "NKG7", "KLRD1",
+              "CD69", "LAT",
+              "CCL4", "CCL5","IL32","MIF",
+              "KLRG1", "CD47", "LAG3", "IFNG"),
+    labSize = 4,
+    x = 'avg_logFC',
+    y = 'p_val_adj',
+    xlim = c(-1.1, 1.2),
+    title = NULL,
+    subtitle = NULL,
+    FCcutoff = 0.1,
+    pCutoff=0.05,
+    pointSize = 1.5,
+    axisLabSize = 11,
+    caption = NULL,
+    legendVisible = F,
+    colAlpha = 1/2, 
+    col = c("grey30", "grey30", "grey30", "red2"),
+    gridlines.major = F,
+    gridlines.minor = F,
+    boxedLabels = F,
+    drawConnectors = T
+) 
+
+p1
+```
+
+```{r fig.width=6, fig.height=4}
+Idents(T_only) <- "celltype_1"
+T_CD8_mem <- subset(T_only, idents = "T_CD8_mem")
+
+Idents(T_CD8_mem) <- "PID_new"
+T_CD8_mem_avg <- AverageExpression(T_CD8_mem, assays = "SCT", slot = "data", return.seurat = T)
+
+features <- c("GZMH","GNLY","GZMA", "GZMB", "GZMK","GZMM","PRF1",
+              "NKG7", "KLRD1",
+              "CD69", "LAT",
+              "CCL4", "CCL5","IL32","MIF",
+              "KLRG1", "CD47", "LAG3", "IFNG")
+features <- rev(features)
+p1 <- DoHeatmap(T_CD8_mem_avg, features = features, draw.lines = F, size = 3) +
+  theme(legend.position = "none")+
+  scale_fill_gradient2( low="blue",high="red", mid = "white")
+
+require(reshape2)
+df <- p1$data
+df$Cell <- NULL
+df <- dcast(df, Feature ~ Identity, value.var = "Expression")
+df <- tibble::column_to_rownames(df, "Feature")
+p2 <- ComplexHeatmap::Heatmap(df, rect_gp = gpar(col = "black", lwd = 0.2),cluster_rows = T)
+p2
+```
+
+
+
+
+### Visualize Exhaustion score score in RRMM
+```{r fig.width=4, fig.height=3.5}
+Idents(T_only) <- "donor_status"
+T_only_RRMM <- subset(T_only, idents=c("RRMM"))
+
+Idents(T_only_RRMM) <- "celltype_1"
+levels(T_only_RRMM) <- c("gdT",  "NKT" , "T_CD8_mem_ck","T_cycling", "T_CD8_tox", "T_CD8_mem", 
+                         "Treg","Th17", "T_CD8_naive", "T_CD4_mem", "T_CD4_naive")
+df <- as.data.frame(T_only_RRMM@active.ident)
+T_only_RRMM <- AddMetaData(T_only_RRMM, col.name = "patient", metadata = df)
+
+p2 <- DotPlot(T_only_RRMM, features = c("Inh_score1"), dot.scale = 7)  +
+  scale_color_gradient( low="blue",high="red")  +
+  theme(axis.title.x = element_blank())+
+  theme(axis.title.y = element_blank())+
+  ggtitle("RRMM") + 
+  theme(legend.title = element_text(size = 5), legend.text = element_text(size = 5))
+p2
+```
+
+
+### gdT cell analysis
+### visualization by heatmap
+#### First get average expression values
+```{r}
+Idents(T_only) <- "celltype_1"
+gdT <- subset(T_only, idents = "gdT")
+Idents(gdT) <- "patient"
+# remove cells with <60 cells
+gdT <- subset(gdT, idents = c("TS6ZX9", "N5CC3E", "N7ZK3L", "32ARQL", "37A66E"), invert = T)
+
+
+```
+
+### DEA RRMM vs. healthy in gdT
+```{r}
+Idents(T_only) <- "celltype_1"
+DEA <- FindMarkers(T_only, group.by = "donor_status", 
+                                ident.1 = "RRMM", ident.2 = "healthy", only.pos = F, logfc.threshold = 0.1, subset.ident = "gdT")
+DEA <- tibble::rownames_to_column(DEA, "gene")
+blacklist <- read.table(".../Blacklist_genes_K43R.txt")
+blacklist <- as.vector(blacklist$V1)
+DEA <- DEA[ ! DEA$gene %in% blacklist, ]
+row.names(DEA) <- NULL
+```
+
+
+```{r fig.width=6, fig.height=6}
+p1 <- EnhancedVolcano(DEA,
+    lab = DEA$gene,
+    selectLab = c("LAG3","TIGIT","VSIR",
+             "ID2","TBX21", "MIF",                                     
+             "IFITM1", "ISG15","ISG20","IFI6","IFI16", "STAT1",
+             "FGR", "IDH2", "RARRES3",
+             "CCL5", "LGALS1", 
+             "CD47", "CD52", 
+             "CORO1A", "ARPC1B", "CD74",
+             "RPL24", "RPL27", "RPL38", "RPS16", "RPS21", "RPS8", "RPL35A", "RPSA", "RPS23", "RPL12"),
+    labSize = 3,
+    x = 'avg_logFC',
+    y = 'p_val_adj',
+    xlim = c(-1, 0.8),
+    title = NULL,
+    subtitle = NULL,
+    FCcutoff = 0.1,
+    pCutoff=0.05,
+    pointSize = 1.5,
+    axisLabSize = 11,
+    caption = NULL,
+    legendVisible = F,
+    colAlpha = 1/2, 
+    col = c("grey30", "grey30", "grey30", "red2"),
+    gridlines.major = F,
+    gridlines.minor = F,
+    boxedLabels = F,
+    drawConnectors = T
+)
+
+
+p1
+```
+
+
+
+### prepare heatmap
+```{r}
+Idents(gdT) <- "PID_new"
+levels(gdT) <- c("RRMM01", "RRMM17", "RRMM13","RRMM07","RRMM04","RRMM18","RRMM08","RRMM12",
+                 "RRMM05","RRMM16","RRMM19","RRMM06","RRMM11","RRMM14",
+                 "BM3","BM5","BM8", "BM6","BM1", "BM7","BM4", "BM2")
+                           
+df <- as.data.frame(gdT@active.ident)
+gdT <- AddMetaData(gdT, col.name = "PID_new", metadata = df)
+
+Idents(gdT) <- "PID_new"
+gdT_avg <- AverageExpression(gdT, assays = c("SCT"), return.seurat = T, verbose = F)
+
+```
+
+```{r fig.width=7, fig.height=4}
+p1 <- DoHeatmap(gdT_avg, features = DEA$gene, draw.lines = F, group.bar=T, size=3)+  
+  theme(legend.position = "none") +
+  scale_fill_gradient2( low="blue",high="red", mid = "white")
+
+### clustered custom heatmap with ComplexHeatmap
+require(reshape2)
+df <- p1$data
+df$Cell <- NULL
+df <- dcast(df, Feature ~ Identity, value.var = "Expression")
+df <- tibble::column_to_rownames(df, "Feature")
+df_2 <- as.data.frame(row.names(df))
+# select genes to plot
+nm <- c(161,286,225,16,20,23,128,113,239,269,67,130,196,263,405,418,324,151,438)
+nm <- sort(nm)
+
+#create heatmap with gene annotations
+ha = rowAnnotation(foo = anno_mark(at = nm, 
+                                   labels = df_2$`row.names(df)`[nm]))
+
+p1 <- ComplexHeatmap::Heatmap(df, rect_gp = gpar(col = "black", lwd = 0.02),right_annotation = ha,
+                              cluster_rows = T, cluster_columns = T)
+p1
+```
+
+
+```{r fig.width=7, fig.height=1.3}
+p1 <- DotPlot(gdT, features = "Inh_score1")
+df <- p1$data
+df <- df[,c(4,5)]
+row.names(df) <- NULL
+
+x <- c("RRMM01", "RRMM17", "RRMM13","RRMM07","RRMM04","RRMM18","RRMM08","RRMM12",
+                                      "RRMM05","RRMM16","RRMM19","RRMM06","RRMM11","RRMM14",
+                                      "BM3","BM5","BM8", "BM6","BM1", "BM7","BM4", "BM2")
+
+df <- df %>%
+  dplyr::slice(match(x, id)) 
+
+df <- tibble::column_to_rownames(df,"id")
+df <- t(df)
+p1 <- ComplexHeatmap::Heatmap(df, rect_gp = gpar(col = "black", lwd = 0.25),
+                              cluster_rows = F,cluster_columns = F)
+p1
+```
+
+
+```{r fig.width=7, fig.height=3}
+Idents(gdT) <- "PID_new"
+levels(gdT) <- c("RRMM01", "RRMM17", "RRMM13","RRMM07","RRMM04","RRMM18","RRMM08","RRMM12",
+                 "RRMM05","RRMM16","RRMM19","RRMM06","RRMM11","RRMM14",
+                 "BM3","BM5","BM8", "BM6","BM1", "BM7","BM4", "BM2")
+                           
+df <- as.data.frame(gdT@active.ident)
+gdT <- AddMetaData(gdT, col.name = "PID_new", metadata = df)
+
+#, "IFNA_score1", "IFNG_score1", "Ribo_score1"
+p3 <- DotPlot(gdT, features = c("IFNA_score1", "IFNG_score1", "Ribo_score1"), 
+              group.by = "patient", dot.scale = 6, dot.min = 0) + coord_flip() +
+  scale_color_viridis(option = "viridis") + 
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  theme(axis.text.y = element_text(angle = 90, hjust = 0.4)) +
+  theme(axis.title.y = element_blank())+
+  theme(axis.title.x = element_blank())+
+  ggtitle("Inhibitory score in individual patients")+ 
+  theme(legend.title = element_text(size = 7), legend.text = element_text(size = 7)) 
+p3
+```
+
+
+### Generate scatterplot of average effector and exhaustion score
+```{r}
+K43R_all_5 <- qread(file = "/K43R_all_5.qs")
+Idents(K43R_all_5) <- "major_population"
+K43R_ME_6 <- subset(K43R_all_5, idents = "TME")
+                    
+gdT <- subset(K43R_ME_6, idents = c("gdT"))
+## remove patients with < 60 gdT cells
+Idents(gdT) <- "patient"
+gdT <- subset(gdT, idents = c("37A66E", "N7ZK3L", "TS6ZX9"), invert = T)
+```
+
+```{r}
+celltype <- gdT
+
+p1 <- DotPlot(celltype, features = c("Eff_score1", "Exh_score1"), group.by = "patient")
+df <- p1$data
+df <- df[,3:5]
+df_w <- pivot_wider(df, names_from = id, values_from = avg.exp.scaled)
+df_gsea <- tibble::column_to_rownames(df_w, "features.plot")
+#df_gsea <- as.data.frame(t(df_gsea))
+df_gsea <- df_gsea[,order(colnames(df_gsea))]
+df_gsea <- as.matrix(df_gsea)
+
+
+require(ggpubr)
+df_scatter <- as.data.frame(t(df_gsea))
+
+df_ann <- FetchData(celltype, vars = c("patient", "t11.14" ))
+df_ann_sum <- df_ann %>% 
+  group_by(patient)  %>% summarise_all(funs(toString(unique(.[!is.na(.)]))))
+df_ann_sum[df_ann_sum==""] <- NA
+
+df_scatter$t11_14 <- df_ann_sum$t11.14 
+
+p1 <- ggplot(df_scatter, aes(x=Eff_score1, y=Exh_score1)) + 
+  geom_point(size=3, aes(color = t11_14)) +
+  geom_smooth(method=lm, colour="black", size=0.5, se = T) +
+  theme(panel.background=element_blank(), 
+        axis.line = element_line(size = 0.5, colour = "black")) +
+  scale_color_manual(values=c("#E69F00", "#56B4E9"), na.value = "grey50") +
+  coord_cartesian(xlim =c(-2, 3), ylim = c(-2, 3)) +
+  stat_cor(method = "pearson")
+
+p1
+```
+
+
+
+
+#### Analysis of gene expression changes upon treatment
+#####  2FTMUU and CSU6UB exhaustion induction in gdT and t_CD8_tox
+
+```{r}
+
+## 2FTMUU
+Idents(T_only) <- "celltype_1"
+K43R_2FTMUU_gdT <- subset(T_only, idents=c("gdT"))
+Idents(K43R_2FTMUU_gdT) <- "sample_id"
+K43R_2FTMUU_gdT <- subset(K43R_2FTMUU_gdT, idents=c("BM1", "2FTMUU-post-ME", "2FTMUU-pre-ME"))
+
+Idents(T_only) <- "celltype_1"
+K43R_2FTMUU_tox <- subset(T_only, idents=c("T_CD8_tox"))
+Idents(K43R_2FTMUU_tox) <- "sample_id"
+K43R_2FTMUU_tox <- subset(K43R_2FTMUU_tox, idents=c("BM1", "2FTMUU-post-ME", "2FTMUU-pre-ME"))
+
+### CSU6UB
+Idents(T_only) <- "celltype_1"
+K43R_CSU6UB_gdT <- subset(T_only, idents=c("gdT"))
+Idents(K43R_CSU6UB_gdT) <- "sample_id"
+K43R_CSU6UB_gdT <- subset(K43R_CSU6UB_gdT, idents=c("BM1", "CSU6UB-post-ME", "CSU6UB-pre-ME"))
+
+Idents(T_only) <- "celltype_1"
+K43R_CSU6UB_T_CD8_tox <- subset(T_only, idents=c("T_CD8_tox"))
+Idents(K43R_CSU6UB_T_CD8_tox) <- "sample_id"
+K43R_CSU6UB_T_CD8_tox <- subset(K43R_CSU6UB_T_CD8_tox, idents=c("BM1", "CSU6UB-post-ME", "CSU6UB-pre-ME"))
+
+```
+
+
+
+### Adapt metadata
+```{r  fig.width=2, fig.height=4}
+Idents(K43R_2FTMUU_gdT) <- "sample_id"
+levels(K43R_2FTMUU_gdT) <- c("BM1", "2FTMUU-pre-ME", "2FTMUU-post-ME")
+df <- as.data.frame(K43R_2FTMUU_gdT@active.ident)
+K43R_2FTMUU_gdT <- AddMetaData(K43R_2FTMUU_gdT, col.name = "sample_id", metadata = df)
+
+Idents(K43R_2FTMUU_tox) <- "sample_id"
+levels(K43R_2FTMUU_tox) <- c("BM1", "2FTMUU-pre-ME", "2FTMUU-post-ME")
+df <- as.data.frame(K43R_2FTMUU_tox@active.ident)
+K43R_2FTMUU_tox <- AddMetaData(K43R_2FTMUU_tox, col.name = "sample_id", metadata = df)
+
+
+Idents(K43R_CSU6UB_gdT) <- "sample_id"
+levels(K43R_CSU6UB_gdT) <- c("BM1", "CSU6UB-pre-ME", "CSU6UB-post-ME")
+df <- as.data.frame(K43R_CSU6UB_gdT@active.ident)
+K43R_CSU6UB_gdT <- AddMetaData(K43R_CSU6UB_gdT, col.name = "sample_id", metadata = df)
+
+Idents(K43R_CSU6UB_T_CD8_tox) <- "sample_id"
+levels(K43R_CSU6UB_T_CD8_tox) <- c("BM1", "CSU6UB-pre-ME", "CSU6UB-post-ME")
+df <- as.data.frame(K43R_CSU6UB_T_CD8_tox@active.ident)
+K43R_CSU6UB_T_CD8_tox <- AddMetaData(K43R_CSU6UB_T_CD8_tox, col.name = "sample_id", metadata = df)
+
+
+```
+
+
+### 2FTMUU gdT
+```{r  fig.width=4, fig.height=4}
+require(ggpubr)
+inh_df <- as.data.frame(K43R_2FTMUU_gdT@meta.data$Inh_score1)
+clusters_df <- as.data.frame(K43R_2FTMUU_gdT@meta.data$sample_id)
+df_final <- cbind(inh_df, clusters_df$"K43R_2FTMUU_gdT@meta.data$sample_id")
+colnames(df_final) <- c("score", "cluster")
+compare_means(score ~ cluster, data = df_final, method = "t.test")
+my_comparisons <- list(c("BM1", "2FTMUU-pre-ME"),c("BM1", "2FTMUU-post-ME"),c("2FTMUU-post-ME", "2FTMUU-post-ME"))
+
+p0 <- ggplot(df_final, aes(x = cluster, y = score, fill = cluster)) + 
+  geom_violin(trim = F)  +
+  stat_summary(fun = median, geom='point', size = 3, colour = "black") +
+  stat_compare_means(comparisons = my_comparisons)
+
+
+Idents(K43R_2FTMUU_gdT) <- "celltype_1"
+p1 <- VlnPlot(K43R_2FTMUU_gdT, features = "Inh_score1", pt.size = 0, cols = c("#FDE725FF", "#95D840FF", "#20A387FF"),
+              group.by = "sample_id", slot = "data", assay = "SCT", sort = F, idents = "gdT") +
+  geom_boxplot(width=.2, outlier.colour=NA, fill= "white", lwd=0.7, fatten =0) +
+    stat_summary(fun = mean, geom = "errorbar", aes(ymax = ..y.., ymin = ..y..),
+               width = 0.2, size = 1, linetype = "solid") + 
+  theme(legend.position = "none") 
+p1$layers[[1]]$aes_params$size = 0.9 
+
+# heatmap
+Idents(K43R_2FTMUU_gdT) <- "sample_id"
+K43R_2FTMUU_gdT_avg <- AverageExpression(K43R_2FTMUU_gdT, assays = "SCT", slot = "data", return.seurat = T)
+features <- c("HAVCR2","VSIR", "CTLA4",  "TIGIT","PDCD1", "LAG3", "CD244")
+p3 <- DoHeatmap(K43R_2FTMUU_gdT_avg, features = features, draw.lines = F, size = 3, label = F, group.bar = F, raster = F) +
+  theme(legend.position = "none")+
+  scale_fill_gradient2( low="blue",high="red", mid = "white")
+
+
+
+p1 | p3
+
+```
+
+
+
+### 2FTMUU t_CD8_tox
+```{r fig.width=4, fig.height=4}
+
+inh_df <- as.data.frame(K43R_2FTMUU_tox@meta.data$Inh_score1)
+clusters_df <- as.data.frame(K43R_2FTMUU_tox@meta.data$sample_id)
+df_final <- cbind(inh_df, clusters_df$"K43R_2FTMUU_tox@meta.data$sample_id")
+colnames(df_final) <- c("score", "cluster")
+compare_means(score ~ cluster, data = df_final, method = "t.test")
+my_comparisons <- list(c("BM1", "2FTMUU-pre-ME"),c("BM1", "2FTMUU-post-ME"),c("2FTMUU-post-ME", "2FTMUU-post-ME"))
+
+p0 <- ggplot(df_final, aes(x = cluster, y = score, fill = cluster)) + 
+  geom_violin(trim = F)  +
+  stat_summary(fun = median, geom='point', size = 3, colour = "black") +
+  stat_compare_means(comparisons = my_comparisons)
+
+
+
+Idents(K43R_2FTMUU_tox) <- "celltype_1"
+p2 <- VlnPlot(K43R_2FTMUU_tox, features = "Inh_score1", pt.size = 0,cols = c("#efe350ff", "#f9a242ff", "#de7065ff"),
+              group.by = "sample_id", slot = "data", assay = "SCT", sort = F, idents = "T_CD8_tox") +
+  geom_boxplot(width=.2, outlier.colour=NA, fill= "white", lwd=0.7, fatten =0) +
+    stat_summary(fun = mean, geom = "errorbar", aes(ymax = ..y.., ymin = ..y..),
+               width = 0.2, size = 1, linetype = "solid") + 
+  theme(legend.position = "none") 
+p2$layers[[1]]$aes_params$size = 0.9
+
+
+Idents(K43R_2FTMUU_tox) <- "sample_id"
+K43R_2FTMUU_tox_avg <- AverageExpression(K43R_2FTMUU_tox, assays = "SCT", slot = "data", return.seurat = T)
+features <- c("HAVCR2","TIGIT","VSIR", "CTLA4", "PDCD1", "LAG3", "CD244")
+p4 <- DoHeatmap(K43R_2FTMUU_tox_avg, features = features, draw.lines = F, size = 3, label = F, group.bar = F, raster = F) +
+  theme(legend.position = "none")+
+  scale_fill_gradient2( low="blue",high="red", mid = "white")
+
+p2 | p4
+```
+
+
+### CSU6UB gdT
+```{r  fig.width=4, fig.height=4}
+
+
+inh_df <- as.data.frame(K43R_CSU6UB_gdT@meta.data$Inh_score1)
+clusters_df <- as.data.frame(K43R_CSU6UB_gdT@meta.data$sample_id)
+df_final <- cbind(inh_df, clusters_df$"K43R_CSU6UB_gdT@meta.data$sample_id")
+colnames(df_final) <- c("score", "cluster")
+compare_means(score ~ cluster, data = df_final, method = "t.test")
+my_comparisons <- list(c("BM1", "CSU6UB-pre-ME"),c("BM1", "CSU6UB-post-ME"),c("CSU6UB-post-ME", "CSU6UB-post-ME"))
+
+p0 <- ggplot(df_final, aes(x = cluster, y = score, fill = cluster)) + 
+  geom_violin(trim = F)  +
+  stat_summary(fun = median, geom='point', size = 3, colour = "black") +
+  stat_compare_means(comparisons = my_comparisons)
+
+
+
+Idents(K43R_CSU6UB_gdT) <- "celltype_1"
+p1 <- VlnPlot(K43R_CSU6UB_gdT, features = "Inh_score1", pt.size = 0, cols = c("#FDE725FF", "#95D840FF", "#20A387FF"),
+              group.by = "sample_id", slot = "data", assay = "SCT", sort = F, idents = "gdT") +
+  geom_boxplot(width=.2, outlier.colour=NA, fill= "white", lwd=0.7, fatten =0) +
+    stat_summary(fun = mean, geom = "errorbar", aes(ymax = ..y.., ymin = ..y..),
+               width = 0.2, size = 1, linetype = "solid") + 
+  theme(legend.position = "none") 
+p1$layers[[1]]$aes_params$size = 0.9 
+
+
+Idents(K43R_CSU6UB_gdT) <- "sample_id"
+K43R_CSU6UB_gdT_avg <- AverageExpression(K43R_CSU6UB_gdT, assays = "SCT", slot = "data", return.seurat = T)
+features <- c("TIGIT","LAG3","VSIR", "PDCD1","HAVCR2",  "CD244","CTLA4")
+p4 <- DoHeatmap(K43R_CSU6UB_gdT_avg, features = features, draw.lines = F, size = 3, label = F, group.bar = F, raster = F) +
+  theme(legend.position = "none")+
+  scale_fill_gradient2( low="blue",high="red", mid = "white")
+
+p5 <- p1 | p4
+p5
+```
+
+### CSU6UB t_CD8_tox
+```{r  fig.width=4, fig.height=4}
+
+
+inh_df <- as.data.frame(K43R_CSU6UB_T_CD8_tox@meta.data$Inh_score1)
+clusters_df <- as.data.frame(K43R_CSU6UB_T_CD8_tox@meta.data$sample_id)
+df_final <- cbind(inh_df, clusters_df$"K43R_CSU6UB_T_CD8_tox@meta.data$sample_id")
+colnames(df_final) <- c("score", "cluster")
+compare_means(score ~ cluster, data = df_final, method = "t.test")
+my_comparisons <- list(c("BM1", "CSU6UB-pre-ME"),c("BM1", "CSU6UB-post-ME"),c("CSU6UB-post-ME", "CSU6UB-post-ME"))
+
+p0 <- ggplot(df_final, aes(x = cluster, y = score, fill = cluster)) + 
+  geom_violin(trim = F)  +
+  stat_summary(fun = median, geom='point', size = 3, colour = "black") +
+  stat_compare_means(comparisons = my_comparisons)
+
+
+
+Idents(K43R_CSU6UB_T_CD8_tox) <- "celltype_1"
+p1 <- VlnPlot(K43R_CSU6UB_T_CD8_tox, features = "Inh_score1", pt.size = 0, cols = c("#efe350ff", "#f9a242ff", "#de7065ff"),
+              group.by = "sample_id", slot = "data", assay = "SCT", sort = F, idents = "T_CD8_tox") +
+  geom_boxplot(width=.2, outlier.colour=NA, fill= "white", lwd=0.7, fatten =0) +
+    stat_summary(fun = mean, geom = "errorbar", aes(ymax = ..y.., ymin = ..y..),
+               width = 0.2, size = 1, linetype = "solid") + 
+  theme(legend.position = "none") 
+p1$layers[[1]]$aes_params$size = 0.9 
+
+
+Idents(K43R_CSU6UB_T_CD8_tox) <- "sample_id"
+K43R_CSU6UB_T_CD8_tox_avg <- AverageExpression(K43R_CSU6UB_T_CD8_tox, assays = "SCT", slot = "data", return.seurat = T)
+features <- c("VSIR","LAG3",  "PDCD1", "CD244","TIGIT","HAVCR2", "CTLA4")
+p4 <- DoHeatmap(K43R_CSU6UB_T_CD8_tox_avg, features = features, draw.lines = F, size = 3, label = F, group.bar = F, raster = F) +
+  theme(legend.position = "none")+
+  scale_fill_gradient2( low="blue",high="red", mid = "white")
+
+p5 <- p1 | p4
+p5
+```
+
+
+
+
+

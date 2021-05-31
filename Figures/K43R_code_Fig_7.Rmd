@@ -1,0 +1,599 @@
+---
+title: "K43R_Fig_7 + Supplementary Fig. 7"
+output: html_notebook
+---
+
+
+```{r setup}
+library(dplyr)
+library(tidyverse)
+library(Seurat)
+library(ggplot2)
+library(sctransform)
+library(qs)
+library(RhpcBLASctl)
+library(ggpointdensity)
+library(viridis)
+library(patchwork)
+library(data.table)
+library(presto)
+library(RColorBrewer)
+library(ComplexHeatmap)
+library(hypeR)
+```
+
+### for reduced UMAP visualization
+```{r}
+blank <- theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),legend.position="none",
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
+```
+
+
+### Load complete RRMM dataset (all patients, all time-points, BME + PCs) + metadata
+```{r}
+K43R_all <- qread(".../K43R_all.qs")
+
+
+#subset BME
+Idents(K43R_all_5) <- "major_population"
+K43R_ME_6 <- subset(K43R_all_5, idents = "TME")
+
+```
+
+
+### check abundance differences per patient
+```{r}
+df <- FetchData(K43R_ME_6, vars = c("celltype_1", "patient"))
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>% 
+  group_by(patient) %>% 
+  dplyr::count(celltype_1, patient, .drop = F) %>% 
+  mutate(prop=prop.table(n)) %>% 
+  mutate(prop=format(prop,digits=2))
+df_freq$prop <- as.numeric(as.character(df_freq$prop))
+
+
+# add 1q info here: high = subclonal + dominant; low = ND/rare
+df_freq$class_1q <- ifelse(df_freq$patient=="2FTMUU","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="32ARQL","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="37A66E","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="6K8YTY","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="6KLSUS","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="8YGUU8","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="CSU6UB","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="E79WZA","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="N5CC3E","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="N7ZK3L","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="NUL141","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="PUVQFD","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="R1H4HE","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="R1V8RN","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="TS6ZX9","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="VP6CSY","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="XF2DTB","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="YK554L","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="ZPMZFJ","low",as.character(df_freq$class_1q)) 
+df_freq$class_1q <- ifelse(df_freq$patient=="ZVNGET","high",as.character(df_freq$class_1q))
+
+```
+
+### check abundance change per celltype
+```{r fig.width=14, fig.height=15}
+
+require(ggpubr)
+p4 <- ggplot(df_freq, aes(x=factor(class_1q, levels = c("low" , "high")), y=prop)) + 
+  geom_boxplot(outlier.size = 0.5) +
+  facet_wrap(vars(celltype_1), scales = "free_y", ncol = 6) +
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=0.6) +
+  geom_text(aes(label=patient),hjust=0, vjust=0, size = 2)+
+  theme(strip.text.x = element_text(size = 6)) +
+  theme(axis.text.x = element_text(size=7))+
+  theme(axis.text.y = element_text(size=6)) +
+  theme_bw() + stat_compare_means()
+p4
+
+```
+
+
+### Summarize p-values in barplot
+```{r fig.width=3, fig.height=4}
+pval <- c(0.77, 0.9, 0.64, 0.43, 1, 0.9, 1, 0.77, 0.97, 0.83, 0.47, 
+          0.38, 0.48, 0.83, 0.77, 0.017, 0.84, 0.43, 0.11, 0.3,0.28, 1,0.4,  0.26,
+          0.59, 0.3, 0.71, 0.97, 0.84, 0.43, 0.17, 0.48)
+celltype_1 <- as.data.frame(table(K43R_ME_6$celltype_1))
+celltype_1 <- as.data.frame(celltype_1[,1])
+colnames(celltype_1) <- "celltype_1"
+
+
+
+celltype_1$pval <- pval 
+celltype_1$pval_log <- log10(celltype_1$pval)
+
+p1 <- ggplot(celltype_1, aes(y=pval_log, x=reorder(celltype_1, pval_log))) + 
+    geom_bar(position="dodge", stat="identity", color="black") +
+ theme(axis.text.x = element_text(angle = 90, hjust = 1), panel.background=element_blank()) +
+ geom_hline(yintercept=-1.301, linetype="dashed", color = "black", size = 0.25)+
+ ylab("Log(10)P") + xlab("") +coord_flip()
+
+p1
+```
+
+
+### Plot only NK_dim
+```{r fig.width=3, fig.height=4}
+df_freq2<- df_freq %>% filter (celltype_1=="NK_dim")
+
+require(ggpubr)
+p4 <- ggplot(df_freq2, aes(x=factor(class_1q, levels = c("low" ,"high")), y=prop)) + 
+  geom_boxplot(outlier.size = 0.5, aes(fill=class_1q)) +
+  scale_fill_brewer(palette="Dark2")+
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=0.6) +
+  theme(strip.text.x = element_text(size = 6)) +
+  theme(axis.text.x = element_text(size=7))+
+  theme(axis.text.y = element_text(size=6)) +
+  theme_bw() + stat_compare_means()
+p4 
+```
+
+
+
+### check abundance differences per patient in Macrophages (celltype_2)
+```{r}
+
+df <- FetchData(K43R_ME_6, vars = c("celltype_2", "patient"))
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>% 
+  group_by(patient) %>% 
+  dplyr::count(celltype_2, patient, .drop = F) %>% 
+  mutate(prop=prop.table(n)) %>% 
+  mutate(prop=format(prop,digits=2))
+df_freq$prop <- as.numeric(as.character(df_freq$prop))
+
+# add 1q info here: high = subclonal + dominant; low = ND/rare
+df_freq$class_1q <- ifelse(df_freq$patient=="2FTMUU","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="32ARQL","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="37A66E","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="6K8YTY","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="6KLSUS","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="8YGUU8","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="CSU6UB","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="E79WZA","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="N5CC3E","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="N7ZK3L","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="NUL141","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="PUVQFD","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="R1H4HE","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="R1V8RN","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="TS6ZX9","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="VP6CSY","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="XF2DTB","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="YK554L","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="ZPMZFJ","low",as.character(df_freq$class_1q)) 
+df_freq$class_1q <- ifelse(df_freq$patient=="ZVNGET","high",as.character(df_freq$class_1q))
+
+```
+
+
+```{r fig.width=14, fig.height=5}
+
+require(ggpubr)
+p4 <- ggplot(df_freq, aes(x=factor(class_1q, levels = c("low" , "high")), y=prop)) + 
+  geom_boxplot(outlier.size = 0.5) +
+  facet_wrap(vars(celltype_2), scales = "free_y", ncol = 6) +
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=0.6) +
+  geom_text(aes(label=patient),hjust=0, vjust=0, size = 2)+
+  theme(strip.text.x = element_text(size = 6)) +
+  theme(axis.text.x = element_text(size=7))+
+  theme(axis.text.y = element_text(size=6)) +
+  theme_bw() + stat_compare_means()
+p4
+
+```
+
+```{r fig.width=2.5, fig.height=3.5}
+pval <- c(0.84,0.42 ,0.65 ,0.64 ,0.58 ,0.4 ,0.1 ,0.59 ,0.43 ,0.013 ,0.77)
+celltype_2 <- as.data.frame(table(K43R_ME_6$celltype_2))
+celltype_2 <- as.data.frame(celltype_2[,1])
+colnames(celltype_2) <- "celltype_2"
+
+celltype_2$pval <- pval 
+celltype_2$pval_log <- log10(celltype_2$pval)
+
+# remove old T-HSP annotation
+celltype_2 <- celltype_2[-c(7), ]
+
+
+p1 <- ggplot(celltype_2, aes(y=pval_log, x=reorder(celltype_2, pval_log))) + 
+    geom_bar(position="dodge", stat="identity", color="black") +
+ theme(axis.text.x = element_text(angle = 90, hjust = 1), panel.background=element_blank()) +
+ geom_hline(yintercept=-1.301, linetype="dashed", color = "black", size = 0.25)+
+ ylab("Log(10)P") + xlab("") +coord_flip()
+
+p1
+```
+
+
+## plot TAM3 only
+```{r fig.width=3, fig.height=4}
+df_freq2<- df_freq %>% filter (celltype_2=="TAM3")
+
+require(ggpubr)
+p4 <- ggplot(df_freq2, aes(x=factor(class_1q, levels = c("low" ,"high")), y=prop)) + 
+  geom_boxplot(outlier.size = 0.5, aes(fill=class_1q)) +
+  scale_fill_brewer(palette="Dark2")+
+  geom_dotplot(binaxis='y', stackdir='center', dotsize=0.6) +
+  theme(strip.text.x = element_text(size = 6)) +
+  theme(axis.text.x = element_text(size=7))+
+  theme(axis.text.y = element_text(size=6)) +
+  theme_bw() + stat_compare_means()
+p4 
+```
+
+
+
+### Check NK cells (especially NK_bright) --> e.g. IL1B & IL18 interaction
+```{r}
+Idents(K43R_ME_6) <- "celltype_1"
+NK <- subset(K43R_ME_6, idents = c("NK_bright", "NK_dim", "NKT"))
+```
+
+
+
+```{r}
+blas_set_num_threads(1)
+omp_set_num_threads(1)
+options(future.globals.maxSize=50*1024^3) 
+NK <- SCTransform(NK, verbose = FALSE)  
+```
+
+
+```{r}
+NK <- RunPCA(NK, pcs = 50, verbose = FALSE) ## no "split.by" needed)
+ElbowPlot(object = NK, ndims = 50) 
+```
+
+
+```{r}
+NK <- RunHarmony(NK, group.by.vars = "sample_id", assay.use="SCT", max.iter.harmony = 20, verbose = F)
+```
+
+
+```{r}
+NK <- FindNeighbors(NK, reduction = "harmony", dims = 1:5, verbose = F)
+NK <- FindClusters(NK, resolution = 0.2, verbose = F)
+NK <- RunUMAP(NK, dims = 1:5, reduction = "harmony", verbose = F)
+```
+
+
+```{r fig.width=12, fig.height=9}
+Idents(NK) <- "seurat_clusters"
+NK <- RenameIdents(NK, `0` = "Mature_NK", `1` = "NKT", `2` = "Activated_NK", `3` = "NK_bright")
+
+df <- as.data.frame(NK@active.ident)
+NK <- AddMetaData(NK, col.name = "celltype_2", metadata = df)
+```
+
+
+```{r}
+Idents(NK) <- "celltype_2"
+levels(NK) <- c("NK_bright", "Activated_NK","NKT", "Mature_NK")
+                                           
+df <- as.data.frame(NK@active.ident)
+NK <- AddMetaData(NK, col.name = "celltype_2", metadata = df)
+
+```
+
+
+```{r fig.width=4.3, fig.height=4}
+p4 <- DimPlot(object = NK, reduction = 'umap', pt.size = 0.5, label = T, group.by = "celltype_2") + blank
+p4
+```
+
+
+```{r fig.width=6, fig.height=3}
+p1 <- DotPlot(NK, features = c("FGFBP2","SPON2", "FCGR3A",
+                         "CD3D","CD3G", "KLRC2", 
+                         "KLRB1","CD69", "JUN",
+                         "SELL", "KLRC1","NCAM1"),
+        group.by = "celltype_2", dot.scale = 6.7) +
+  scale_color_gradient( low="blue",high="red") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+p1
+```
+
+
+
+```{r fig.width=7, fig.height=2}
+Idents(NK) <- "class_1q"
+
+# 1q info here: high = subclonal + dominant; low = ND/rare
+
+
+NK_low <- subset(NK, idents = "low")
+emb <- Embeddings(NK_low, reduction = "umap")
+emb <- as.data.frame(emb)
+p1<- ggplot(data = emb, mapping = aes(x=UMAP_1, y = UMAP_2)) +
+  geom_pointdensity() +
+  scale_color_viridis() + blank
+
+
+NK_high <- subset(NK, idents = "high")
+emb <- Embeddings(NK_high, reduction = "umap")
+emb <- as.data.frame(emb)
+p2 <- ggplot(data = emb, mapping = aes(x=UMAP_1, y = UMAP_2)) +
+  geom_pointdensity() +
+  scale_color_viridis() + blank
+
+
+
+p3 <- FeaturePlot(object = NK,  features = c("GZMB"), cols = c("grey", "firebrick"), 
+                 pt.size =0.5, min.cutoff = "q50", order = F) + blank
+
+
+p4 <- FeaturePlot(object = NK,  features = c("PRF1"), cols = c("grey", "firebrick"), 
+                 pt.size =0.5, min.cutoff = "q50", order = F) + blank
+
+
+p5 <- p1 | p2 | p3 | p4
+
+p5
+
+```
+
+
+### Add celltype_2 info of NK cells to total ME dataset
+```{r}
+
+df <- FetchData(NK, vars = c("celltype_2"))
+
+K43R_ME_6 <- AddMetaData(K43R_ME_6, "celltype_2", metadata = df)
+table(K43R_ME_6$celltype_2)
+```
+
+
+
+```{r}
+df <- FetchData(K43R_ME_6, vars = c("celltype_2", "patient"))
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>% 
+  group_by(patient) %>% 
+  dplyr::count(celltype_2, patient, .drop = F) %>% 
+  mutate(prop=prop.table(n)) %>% 
+  mutate(prop=format(prop,digits=2))
+df_freq$prop <- as.numeric(as.character(df_freq$prop))
+
+# 1q info here: high = dominant; int = subclonal; low = ND/rare
+
+df_freq$class_1q <- ifelse(df_freq$patient=="2FTMUU","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="32ARQL","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="37A66E","int",as.character(df_freq$class_1q)) #
+df_freq$class_1q <- ifelse(df_freq$patient=="6K8YTY","low",as.character(df_freq$class_1q)) 
+df_freq$class_1q <- ifelse(df_freq$patient=="6KLSUS","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="8YGUU8","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="CSU6UB","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="E79WZA","int",as.character(df_freq$class_1q)) #
+df_freq$class_1q <- ifelse(df_freq$patient=="N5CC3E","int",as.character(df_freq$class_1q)) # 
+df_freq$class_1q <- ifelse(df_freq$patient=="N7ZK3L","high",as.character(df_freq$class_1q)) 
+df_freq$class_1q <- ifelse(df_freq$patient=="NUL141","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="PUVQFD","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="R1H4HE","int",as.character(df_freq$class_1q)) #
+df_freq$class_1q <- ifelse(df_freq$patient=="R1V8RN","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="TS6ZX9","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="VP6CSY","int",as.character(df_freq$class_1q)) #
+df_freq$class_1q <- ifelse(df_freq$patient=="XF2DTB","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="YK554L","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="ZPMZFJ","low",as.character(df_freq$class_1q)) 
+df_freq$class_1q <- ifelse(df_freq$patient=="ZVNGET","high",as.character(df_freq$class_1q))
+```
+
+```{r fig.width=10, fig.height=3.5}
+require(ggpubr)
+
+my_comparisons <- list( c("low", "high"), c("low", "int") )
+
+
+p4 <- ggplot(df_freq, aes(x=factor(class_1q, levels = c("low", "int","high")), y=prop)) + 
+  geom_beeswarm(size=2.5, cex = 3) +
+  stat_summary(fun="mean",geom="crossbar", mapping=aes(ymin=..y.., ymax=..y..), 
+                 width=0.4,size=0.9, position=position_dodge(),show.legend = FALSE, color = "red") +
+ stat_compare_means(comparisons = my_comparisons)+
+  facet_wrap(vars(celltype_2), scales = "free_y", ncol = 5) +
+  theme(panel.background=element_blank(),
+        axis.title.x=element_blank(),
+        axis.line = element_line(colour = "black")+
+    stat_summary(fun="mean",geom="crossbar", mapping=aes(ymin=..y.., ymax=..y..), width=1, position=position_dodge(),show.legend = FALSE)) + 
+  ylab(element_blank()) + 
+  ggtitle("NK") +
+ theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p4 
+
+
+```
+
+
+
+Check Dendritic cells
+```{r}
+Idents(K43R_ME_6) <- "celltype_1"
+DCs <- subset(K43R_ME_6, idents = c("cDC2"))
+```
+
+
+```{r}
+blas_set_num_threads(1)
+omp_set_num_threads(1)
+options(future.globals.maxSize=50*1024^3) 
+DCs <- SCTransform(DCs, verbose = FALSE)  
+
+```
+
+
+```{r}
+DCs <- RunPCA(DCs, pcs = 50, verbose = FALSE) ## no "split.by" needed)
+ElbowPlot(object = DCs, ndims = 50) 
+```
+
+
+
+```{r}
+DCs <- RunHarmony(DCs, group.by.vars = "sample_id", assay.use="SCT", max.iter.harmony = 20, verbose = F)
+```
+
+
+```{r}
+DCs <- FindNeighbors(DCs, reduction = "harmony", dims = 1:10)
+DCs <- FindClusters(DCs, resolution = 0.1, verbose = F)
+DCs <- RunUMAP(DCs, dims = 1:10, reduction = "harmony", verbose = F)
+```
+
+
+```{r fig.width=12, fig.height=9}
+Idents(DCs) <- "seurat_clusters"
+DCs <- RenameIdents(DCs, `0` = "cDC2_B", `1` = "cDC2_A",`2`= "cDC2_Cycling", `3`="cDC2_C")
+
+df <- as.data.frame(DCs@active.ident)
+DCs <- AddMetaData(DCs, col.name = "celltype_2", metadata = df)
+```
+
+
+```{r}
+Idents(DCs) <- "celltype_2"
+levels(DCs) <- c("cDC2_A", "cDC2_B", "cDC2_C", "cDC2_Cycling")
+                                           
+df <- as.data.frame(DCs@active.ident)
+DCs <- AddMetaData(DCs, col.name = "celltype_2", metadata = df)
+
+```
+
+
+```{r fig.width=8, fig.height=4}
+p4 <- DimPlot(object = DCs, reduction = 'umap', pt.size = 1, label = T, group.by = "celltype_2") + blank
+
+p5 <- DimPlot(object = DCs, reduction = 'umap', pt.size = 1.5, label = F, group.by = "class_1q", cols = "Dark2") + blank
+
+
+p6 <- p4 | p5
+p6
+```
+
+
+```{r}
+Idents(DCs) <- "celltype_2"
+DEA_DCs <- FindAllMarkers(DCs, only.pos = F, logfc.threshold = 0.1)
+DEA_DCs <- DEA_DCs %>% filter(p_val_adj < 0.05) 
+
+
+```
+
+
+```{r fig.width=7.1, fig.height=6}
+top10 <- DEA_DCs %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+p1 <- DoHeatmap(DCs, features = top10$gene, draw.lines = F, raster = F) + 
+  scale_fill_gradient2( low="blue",high="red", mid = "white") 
+p1 
+```
+
+
+
+### prepare heatmap 
+```{r}
+Idents(DCs) <- "celltype_2"
+DC_avg <- AverageExpression(DCs, assays = "SCT", slot = "data", return.seurat = T, verbose = F)
+
+```
+
+
+```{r fig.width=4, fig.height=5}
+p1 <- DoHeatmap(DC_avg, features = c("CCR1", "CCR2", "CD163", "TREM1", "IL17RA","PYCARD", "SERPINA1",
+                               "CLEC12A","CLEC4E","VSIR", "CLEC7A",  
+                                "CTSD","CTSS", "CTSB"), draw.lines = F, raster = F) + 
+  scale_fill_gradient2( low="blue",high="red", mid = "white") 
+
+p1
+```
+
+
+
+### Check abundance in whole dataset
+```{r}
+df <- FetchData(DCs, vars = c("celltype_2"))
+K43R_ME_6 <- AddMetaData(K43R_ME_6, "celltype_2", metadata = df)
+table(K43R_ME_6$celltype_2)
+```
+
+
+```{r}
+df <- FetchData(K43R_ME_6, vars = c("celltype_2", "patient"))
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>% 
+  group_by(patient) %>% 
+  dplyr::count(celltype_2, patient, .drop = F) %>% 
+  mutate(prop=prop.table(n)) %>% 
+  mutate(prop=format(prop,digits=2))
+df_freq$prop <- as.numeric(as.character(df_freq$prop))
+
+
+# 1q info here: high = dominant; int = subclonal; low = ND/rare
+df_freq$class_1q <- ifelse(df_freq$patient=="2FTMUU","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="32ARQL","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="37A66E","int",as.character(df_freq$class_1q)) #
+df_freq$class_1q <- ifelse(df_freq$patient=="6K8YTY","low",as.character(df_freq$class_1q)) 
+df_freq$class_1q <- ifelse(df_freq$patient=="6KLSUS","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="8YGUU8","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="CSU6UB","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="E79WZA","int",as.character(df_freq$class_1q)) #
+df_freq$class_1q <- ifelse(df_freq$patient=="N5CC3E","int",as.character(df_freq$class_1q)) # 
+df_freq$class_1q <- ifelse(df_freq$patient=="N7ZK3L","high",as.character(df_freq$class_1q)) 
+df_freq$class_1q <- ifelse(df_freq$patient=="NUL141","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="PUVQFD","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="R1H4HE","int",as.character(df_freq$class_1q)) #
+df_freq$class_1q <- ifelse(df_freq$patient=="R1V8RN","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="TS6ZX9","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="VP6CSY","int",as.character(df_freq$class_1q)) #
+df_freq$class_1q <- ifelse(df_freq$patient=="XF2DTB","low",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="YK554L","high",as.character(df_freq$class_1q))
+df_freq$class_1q <- ifelse(df_freq$patient=="ZPMZFJ","low",as.character(df_freq$class_1q)) 
+df_freq$class_1q <- ifelse(df_freq$patient=="ZVNGET","high",as.character(df_freq$class_1q))
+```
+
+
+
+```{r fig.width=10, fig.height=4}
+require(ggpubr)
+
+my_comparisons <- list( c("low", "high") , c("low", "int") )
+
+p4 <- ggplot(df_freq, aes(x=factor(class_1q, levels = c("low", "int","high")), y=prop)) + 
+  geom_beeswarm(size=2.5, cex = 3) +
+  stat_summary(fun="mean",geom="crossbar", mapping=aes(ymin=..y.., ymax=..y..), 
+                 width=0.4,size=0.9, position=position_dodge(),show.legend = FALSE, color = "red") +
+ stat_compare_means(comparisons = my_comparisons)+
+  facet_wrap(vars(celltype_2), scales = "free_y", ncol = 5) +
+  theme(panel.background=element_blank(),
+        axis.title.x=element_blank(),
+        axis.line = element_line(colour = "black")+
+    stat_summary(fun="mean",geom="crossbar", mapping=aes(ymin=..y.., ymax=..y..), width=1, position=position_dodge(),show.legend = FALSE)) + 
+  ylab(element_blank()) + 
+  ggtitle("DC") +
+ theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p4 
+
+
+```
+
+
+
+
+
+
+
+
+

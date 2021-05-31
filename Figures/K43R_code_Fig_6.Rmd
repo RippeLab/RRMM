@@ -1,0 +1,560 @@
+---
+title: "K43R_Fig_6 + Supplementary Fig. 6"
+output: html_notebook
+---
+
+
+```{r setup}
+library(dplyr)
+library(tidyverse)
+library(Seurat)
+library(ggplot2)
+library(sctransform)
+library(qs)
+library(RhpcBLASctl)
+library(ggpointdensity)
+library(viridis)
+library(patchwork)
+library(data.table)
+library(presto)
+library(RColorBrewer)
+library(ComplexHeatmap)
+library(hypeR)
+```
+
+
+
+### Load HCA and RRMM datasets
+```{r}
+# load HCA dataset (data can be downloaded here: https://data.humancellatlas.org/explore/projects/cc95ff89-2e68-4a08-a234-480eca21ce79)
+# optional: remove nPCs before integration, can be also done afterwards
+HCA.integrated_2 <- qread(file = ".../HCA.integrated.qs") 
+
+# load RRMM dataset
+
+### Load complete RRMM dataset (all patients, all time-points, BME + PCs) + metadata
+K43R_all <- qread("/K43R_all.qs")
+
+
+### Filter ME cells (CD138 negative fraction)
+Idents(K43R_all) <- "major_population"
+PCs <- subset(K43R_all, idents = "TME")
+DefaultAssay(K43R_all) <- "RNA"
+
+HCA_K43R_ME <- merge(K43R_all, HCA.integrated_2)  #--> normalization and intergration see vignette for Fig_2
+```
+
+
+
+### Plot split UMAP for CD68
+```{r fig.width=13, fig.height=6}
+p1 <- FeaturePlot(object = HCA_K43R_ME,  features = c("CD68"), 
+            cols = c("grey", "firebrick"), pt.size =0.5, min.cutoff = "q10", order = F, split.by = "donor_status") +
+  blank
+p1
+```
+
+
+
+```{r}
+### Subset only Mono/Macro_CD16 cells
+Idents(HCA_K43R_ME) <- "celltype_1"
+Mono_CD16 <- subset(HCA_K43R_ME, idents = "Mono/Macro_CD16")
+
+```
+
+```{r}
+blas_set_num_threads(1)
+omp_set_num_threads(1)
+options(future.globals.maxSize=50*1024^3) 
+Mono_CD16 <- SCTransform(Mono_CD16, verbose = FALSE)  
+```
+
+
+```{r}
+Mono_CD16 <- RunPCA(Mono_CD16, pcs = 50, verbose = FALSE) ## no "split.by" needed)
+ElbowPlot(object = Mono_CD16, ndims = 50) 
+```
+
+
+```{r}
+# important to run only one iteration --> otherwise over-alignment e.g. NCM + TAM1 (distinguished by e.g. CD68)
+Mono_CD16 <- RunHarmony(Mono_CD16, group.by.vars = "sample_id", assay.use="SCT", max.iter.harmony = 1)
+```
+
+
+```{r}
+Mono_CD16 <- FindNeighbors(Mono_CD16, reduction = "harmony", dims = 1:20)
+Mono_CD16 <- FindClusters(Mono_CD16, resolution = 1.1, verbose = F)
+Mono_CD16 <- RunUMAP(Mono_CD16, dims = 1:20, reduction = "harmony", verbose = F)
+
+```
+
+
+```{r fig.width=8, fig.height=11}
+DefaultAssay(Mono_CD16) <- "SCT" 
+blank <- theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          axis.title.y=element_blank(),legend.position="none",
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
+p1 <- FeaturePlot(object = Mono_CD16,  features = c("FCGR3A"), cols = c("grey", "firebrick"), pt.size =0.5, min.cutoff = "q10", order = F) + blank
+p2 <- FeaturePlot(object = Mono_CD16,  features = c("CD14"), cols = c("grey", "firebrick"), pt.size =0.5, min.cutoff = "q10", order = F) + blank
+
+p4 <- FeaturePlot(object = Mono_CD16,  features = c("C1QA"), cols = c("grey", "firebrick"), pt.size =0.5, min.cutoff = "q10", order = F)+ blank
+
+#p6 <- FeaturePlot(object = Mono_CD16,  features = c("CPVL"), cols = c("grey", "firebrick"), pt.size =0.5, min.cutoff = "q10", order = F)+ blank
+p7 <- FeaturePlot(object = Mono_CD16,  features = c("FGD2"), cols = c("grey", "firebrick"), pt.size =0.5, min.cutoff = "q10", order = F)+ blank
+p8 <- FeaturePlot(object = Mono_CD16,  features = c("ALDOA"), cols = c("grey", "firebrick"), pt.size =0.5, min.cutoff = "q10", order = F)+ blank
+p9 <- FeaturePlot(object = Mono_CD16,  features = c("CXCL8"), cols = c("grey", "firebrick"), pt.size =0.5, min.cutoff = "q10", order = F)+ blank
+p10 <- FeaturePlot(object = Mono_CD16,  features = c("VMO1"), cols = c("grey", "firebrick"), pt.size =0.5, min.cutoff = "q10", order = F)+ blank
+p11 <- FeaturePlot(object = Mono_CD16,  features = c("MEG3"), cols = c("grey", "firebrick"), pt.size =0.5, min.cutoff = "q10", order = F)+ blank
+p12 <- FeaturePlot(object = Mono_CD16,  features = c("LYPD2"), cols = c("grey", "firebrick"), pt.size =0.5, min.cutoff = "q10", order = F)+ blank
+p14 <- FeaturePlot(object = Mono_CD16,  features = c("CD68"), cols = c("grey", "firebrick"), pt.size =0.5, min.cutoff = "q10", order = F)+ blank
+p15 <- FeaturePlot(object = Mono_CD16,  features = c("MRC1"), cols = c("grey", "firebrick"), pt.size =0.5, min.cutoff = "q10", order = T)+ blank
+
+p13 <- CombinePlots(list(p1,p2, p4,p7, p8,p9,p10, p11, p12, p14, p15), ncol = 3, legend = NULL)
+p13
+```
+
+
+
+```{r fig.width=6, fig.height=5}
+Idents(Mono_CD16) <- "seurat_clusters"
+
+Mono_CD16 <- RenameIdents(Mono_CD16, 
+                           `0` = "TAM1", `1` = "TAM1", `2` = "NCM", `3` = "LYPD2+", `4` = "NCM",
+                              `5` = "FGD2+", `6` = "TAM2", `7` = "TAM1", `8` = "IM",`9` = "NCM_IL8+", `10` = "NCM",
+                              `11` = "FGD2+", `12` = "TAM1", `13` = "VMO1+", `14` = "MEG3+", `15` = "TAM3",`16` = "FGD2+")
+
+df <- as.data.frame(Mono_CD16@active.ident)
+Mono_CD16 <- AddMetaData(Mono_CD16, col.name = "celltype_2", metadata = df)
+
+
+DimPlot(object = Mono_CD16, reduction = 'umap', pt.size = 0.002, label = T, group.by = "celltype_2") + 
+  ggtitle("Celltype") +
+  theme(legend.position = "none")
+```
+
+
+
+### Plot by donor for supplement
+```{r fig.width=5.5, fig.height=5}
+p1 <- DimPlot(object = Mono_CD16, reduction = 'umap', pt.size = 0.2, label = F, group.by = "PID_new") + 
+  theme(legend.position = "none")
+p1
+
+```
+
+
+
+## Plot by donor-status
+```{r fig.width=10, fig.height=5}
+p1 <- DimPlot(object = Mono_CD16, reduction = 'umap', pt.size = 0.2, group.by = "donor_status", label = F, split.by = "donor_status") + 
+  blank +
+  theme(legend.position = "none")
+p1
+```
+
+
+
+```{r fig.width=7, fig.height=3.5}
+df <- FetchData(Mono_CD16, vars = c("celltype_2", "patient"))
+df <- df %>% modify_if(is.character, as.factor)
+
+df_freq <- df %>% 
+  group_by(patient) %>% 
+  dplyr::count(celltype_2, patient, .drop = F) %>% 
+  mutate(prop=prop.table(n)) %>% 
+  mutate(prop=format(prop,digits=2))
+df_freq$prop <- as.numeric(as.character(df_freq$prop))
+
+## Add column for donor_status (necessay due to .drop = F)
+df_freq$donor_status <- ifelse(df_freq$patient=="BM1","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM2","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM3","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM4","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM5","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM6","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM7","healthy",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="BM8","healthy",as.character(df_freq$donor_status))
+
+df_freq$donor_status <- ifelse(df_freq$patient=="2FTMUU","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="32ARQL","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="37A66E","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="6K8YTY","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="6KLSUS","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="8YGUU8","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="CSU6UB","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="E79WZA","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="N5CC3E","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="N7ZK3L","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="NUL141","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="PUVQFD","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="R1H4HE","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="R1V8RN","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="TS6ZX9","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="VP6CSY","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="XF2DTB","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="YK554L","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="ZPMZFJ","RRMM",as.character(df_freq$donor_status))
+df_freq$donor_status <- ifelse(df_freq$patient=="ZVNGET","RRMM",as.character(df_freq$donor_status))
+
+
+
+require(ggpubr)
+
+df_freq_TAM <- df_freq %>% filter(celltype_2=="TAM3" | celltype_2=="TAM2" | celltype_2=="TAM1"| celltype_2=="IM"| celltype_2=="NCM")
+
+p4 <- ggplot(df_freq_TAM, aes(x=factor(donor_status, levels = c("healthy", "RRMM")), y=prop)) + 
+  geom_beeswarm(size=2.5, cex = 3) +
+  stat_summary(fun="mean",geom="crossbar", mapping=aes(ymin=..y.., ymax=..y..), 
+                 width=0.4,size=0.9, position=position_dodge(),show.legend = FALSE, color = "red") +
+  facet_wrap(vars(celltype_2), scales = "free_y", ncol = 5) +
+  theme(panel.background=element_blank(),
+        axis.title.x=element_blank(),
+        axis.line = element_line(colour = "black")+
+    stat_summary(fun="mean",geom="crossbar", mapping=aes(ymin=..y.., ymax=..y..), width=1, position=position_dodge(),show.legend = FALSE)) + 
+  ylab(element_blank())  +
+ theme(axis.text.x = element_text(angle = 45, hjust = 1))
+p4 
+
+
+```
+
+
+
+#### Plot main markers as Violin
+```{r}
+Idents(Mono_CD16) <- "celltype_2"
+levels(Mono_CD16) <- c("NCM","NCM_IL8+","MEG3+","LYPD2+","VMO1+","FGD2+", "IM","TAM3","TAM2", "TAM1")
+                                           
+df <- as.data.frame(Mono_CD16@active.ident)
+Mono_CD16 <- AddMetaData(Mono_CD16, col.name = "celltype_2", metadata = df)
+```
+
+
+```{r fig.width=5, fig.height=6}
+p1 <- VlnPlot(Mono_CD16, features = "CD14", pt.size = 0, slot = "data", group.by = "celltype_2", sort = F, split.by = "donor_status", split.plot = T) +
+  geom_boxplot(width=.15, outlier.colour=NA, fill= "white", lwd=0.5)+
+  theme(axis.title.x=element_blank(), 
+        axis.title.y.left =element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+p1$layers[[1]]$aes_params$size = 0.5
+
+p2 <- VlnPlot(Mono_CD16, features = "FCGR3A", pt.size = 0, slot = "data", group.by = "celltype_2", sort = F, split.by = "donor_status", split.plot = T) +
+  geom_boxplot(width=.15, outlier.colour=NA, fill= "white", lwd=0.5)+
+  theme(legend.position = "none")+
+  theme(axis.title.x=element_blank(), 
+        axis.title.y.left =element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+p2$layers[[1]]$aes_params$size = 0.5
+
+p3 <- VlnPlot(Mono_CD16, features = "C1QA", pt.size = 0, slot = "data", group.by = "celltype_2", sort = F, split.by = "donor_status", split.plot = T) +
+  geom_boxplot(width=.15, outlier.colour=NA, fill= "white", lwd=0.5)+
+  theme(legend.position = "none") +
+  theme(axis.title.x=element_blank(), 
+        axis.title.y.left =element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+p3$layers[[1]]$aes_params$size = 0.5
+
+p4 <- VlnPlot(Mono_CD16, features = "HLA-DRA", pt.size = 0, slot = "data", group.by = "celltype_2", sort = F, split.by = "donor_status", split.plot = T) +
+  geom_boxplot(width=.15, outlier.colour=NA, fill= "white", lwd=0.5)+
+  theme(legend.position = "none") +
+  theme(axis.title.x=element_blank(), 
+        axis.title.y.left =element_blank())
+p4$layers[[1]]$aes_params$size = 0.5
+
+
+
+p6 <- p1/p2/p3/p4
+p6
+```
+
+
+
+## TAM1 vs. Monocyte analysis
+````{r}
+Idents(Mono_CD16) <- "celltype_2"
+DEA <- FindMarkers(Mono_CD16, group.by = "celltype_2", 
+                                ident.1 = "TAM1",ident.2 = "NCM", only.pos = F, logfc.threshold = 0.1)
+DEA <- tibble::rownames_to_column(DEA, "gene")
+DEA <- DEA %>% filter(p_val_adj < 0.05)
+blacklist <- read.table("/media/ag-rippe/NGS_Stephan/General/gene_lists/Blacklist_genes_K43R.txt")
+blacklist <- as.vector(blacklist$V1)
+DEA <- DEA[ ! DEA$gene %in% blacklist, ]
+```
+
+
+```{r fig.width=6, fig.height=5}
+p1 <- EnhancedVolcano(DEA,
+    lab = DEA$gene,
+    selectLab = c("CD68", "CLEC4A", "TNFSF10", "CORO1A", "ISG15", "FCER1G", "CSF1R", "CD74", "CD53",
+                  "IFI30","IFI35", "IFI44","IFI44L",
+                  "IRF1", "IRF3", "IRF7", "IFIT1", "IFIT2","IFIT3",
+                  "RPS17", "RPS21", "RPS21", "RPL12", "RPL27", "RPL37",
+                  "JUN", "FOS", "KLF6", "MAFB", "ALDOA", "JUND", "FOSB"),
+    labSize = 4,
+    x = 'avg_logFC',
+    y = 'p_val_adj',
+    xlim = c(-1.1, 1.2),
+    title = NULL,
+    subtitle = NULL,
+    FCcutoff = 0.1,
+    pCutoff=0.05,
+    pointSize = 1.5,
+    axisLabSize = 11,
+    caption = NULL,
+    legendVisible = F,
+    colAlpha = 1/2, 
+    col = c("grey30", "grey30", "grey30", "red2"),
+    gridlines.major = F,
+    gridlines.minor = F,
+    boxedLabels = F,
+    drawConnectors = T
+) 
+
+p1
+```
+
+
+####gene set enrichment analysis
+```{r}
+# prepare gene sets
+library(hypeR)
+library(msigdbr)
+msigdb_path <- msigdb_download_all(species="Homo sapiens")
+genesets <- msigdb_fetch(msigdb_path, "H")
+```
+
+```{r fig.width=7, fig.height=5}
+DEA_M1_up_gsea <- DEA %>% filter(avg_logFC > 0.1)
+DEA_M1_up_gsea <- DEA_M1_up_gsea %>% filter(p_val_adj < 0.05)
+hyp_DEA_M1_up_gsea <- hypeR(DEA_M1_up_gsea$gene, genesets)
+
+p1 <- hyp_dots(hyp_DEA_M1_up_gsea, return_plots = T, show_plots = F, top = 5)
+p1$layers[[1]] <- rm()
+p1 <- p1 + geom_point(aes(size=genes.overlap/gset.size), show.legend = T) + 
+  theme_minimal() + 
+  guides(size=guide_legend(title = "Gene ratio")) + 
+  ggtitle("TAM1_up") + 
+  theme(axis.title.y.left =element_blank())
+
+DEA_Mono_down_gsea <- DEA %>% filter(avg_logFC < -0.1)
+DEA_Mono_down_gsea <- DEA_Mono_down_gsea %>% filter(p_val_adj < 0.05)
+hyp_DEA_Mono_down_gsea <- hypeR(DEA_Mono_down_gsea$gene, genesets)
+
+p2 <- hyp_dots(hyp_DEA_Mono_down_gsea, return_plots = T, show_plots = F, top = 5)
+p2$layers[[1]] <- rm()
+p2 <- p2 + geom_point(aes(size=genes.overlap/gset.size), show.legend = T) + 
+  theme_minimal() + 
+  guides(size=guide_legend(title = "Gene ratio")) + 
+  ggtitle("TAM1_down") + 
+  theme(axis.title.y.left =element_blank()) 
+p3 <- p1 / p2
+p3
+```
+
+```{r}
+Idents(Mono_CD16) <- "celltype_2"
+DEA <- FindMarkers(Mono_CD16, group.by = "celltype_2", 
+                                ident.1 = "TAM3", ident.2 = "TAM1", only.pos = F, logfc.threshold = 0.1)
+DEA <- tibble::rownames_to_column(DEA, "gene")
+DEA <- DEA %>% filter(p_val_adj < 0.05)
+blacklist <- read.table(".../Blacklist_genes_K43R.txt")
+blacklist <- as.vector(blacklist$V1)
+DEA <- DEA[ ! DEA$gene %in% blacklist, ]
+```
+
+
+```{r fig.width=6, fig.height=5}
+
+p1 <- EnhancedVolcano(DEA,
+    lab = DEA$gene,
+    selectLab = c("NR4A2", "MRC1", "CD163", "VSIG4", "MS4A6A", "CLEC10A", "APOC1", "CD84","ITGAM",
+                  "C1QA","C1QB", "C1QC",
+                  "CXCL8", "CXCL2", "IL1B", "IL18", "LGALS2","CCL3",
+                  "CXCR4", "CD36", "CD63", "CD302", "CD72", "CD93", "GPR183", "CD14",
+                  "HLA-B", "HLA-C", "HLA-E", "IFITM2", "ISG15", "IFITM1", "IFITM3", "IRF1"),
+    labSize = 4,
+    x = 'avg_logFC',
+    y = 'p_val_adj',
+    xlim = c(-1.1, 2),
+    title = NULL,
+    subtitle = NULL,
+    FCcutoff = 0.1,
+    pCutoff=0.05,
+    pointSize = 1.5,
+    axisLabSize = 11,
+    caption = NULL,
+    legendVisible = F,
+    colAlpha = 1/2, 
+    col = c("grey30", "grey30", "grey30", "red2"),
+    gridlines.major = F,
+    gridlines.minor = F,
+    boxedLabels = F,
+    drawConnectors = T
+) 
+
+p1
+```
+
+### prepare heatmap for TAMs
+```{r fig.width=13, fig.height=3}
+
+Idents(Mono_CD16) <- "celltype_2"
+TAM <- subset(Mono_CD16, idents = c("IM", "TAM3","TAM2", "TAM1"))
+
+Idents(TAM) <- "celltype_2"
+levels(TAM) <- c("IM", "TAM3","TAM2", "TAM1")
+                                           
+df <- as.data.frame(TAM@active.ident)
+TAM <- AddMetaData(TAM, col.name = "celltype_2", metadata = df)
+
+TAM_avg <- AverageExpression(TAM, assays = "SCT", slot = "data", return.seurat = T, verbose = F)
+```
+
+
+```{r fig.width=4.5, fig.height=10}
+
+features <- c("FCN1", "VCAN","S100A8","S100A9","LGALS1","SELL","CXCL8", "VEGFA","HBEGF",
+              "STAB1","APOE", "APOC1","LIPA",
+              "NR4A2","NR4A3","TFEC","ZFP36L2","YBX3","HES1","ZFP36","ZFP36L1","PRDM1", "MAF", "IRF8","FOXN3","CIITA",
+              "CD1D","ITGAM","CD163","IL13RA1", "SIRPA", "CD9","CXCR4","FCGRT", "CD84","CD4","CD63","CLEC10A","VSIG4", "CD38","CD72","FOLR2","SIRPA","MRC1",
+              "GRN","CCL3L1", "TGFBI","CCL3", "CXCL2","IL18", "SELENOP",
+              "CD74","HLA-DMA","HLA-DRA",  "HLA-DRB1", "HLA-DQB1", "HLA-DMB", "HLA-DPB1","HLA-DQA1","HLA-DPA1",
+              "C1QC","C1QA", "C1QB",
+              "SLC25A5", "SLC7A7","SLC24A4",
+              "HLA-E","HLA-B", "HLA-C", 
+              "IRF1","IFITM3","LY6E","IFITM1","IFITM2", "ISG15")
+p1 <- DoHeatmap(TAM_avg, features = features, draw.lines = F, raster = F) + 
+  scale_fill_viridis(option = "magma")
+p1
+```
+
+
+
+
+## Plot interactions derived from CellphoneDB
+### Load ME cells
+
+```{r}
+
+
+Idents(K43R_all) <- "major_population"
+K43R_ME_6 <- subset(K43R_all, idents = "TME")
+Idents(K43R_ME_6) <- "celltype_1"
+K43R_ME_6 <- subset(K43R_ME_6, idents = "Mono/Macro_CD16", invert = T)
+
+Idents(K43R_ME_6) <- "celltype_1"
+levels(K43R_ME_6) <- c("T_CD4_naive", "T_CD4_mem", "Th17", "Treg","T_cycling",
+                              "T_CD8_naive", "T_CD8_mem","T_CD8_mem_ck", "T_CD8_tox",
+                              "gdT","NKT","NK_dim","NK_bright",
+                              "CLP","ProB","PreB","B_im","B",
+                              "MkP","ERP","Er",
+                              "HSC","MPP","prMa", "GMP",
+                              "prMono","Mono/Macro_CD14",
+                              "preDC","pDC","cDC1", "cDC2")
+                                           
+df <- as.data.frame(K43R_ME_6@active.ident)
+K43R_ME_6 <- AddMetaData(K43R_ME_6, col.name = "celltype_1", metadata = df)
+```
+
+
+
+
+```{r fig.width=10, fig.height=5}
+p1 <- DotPlot(TAM, features = c("THBS1", 
+                                "SEMA4D", 
+                                "ITGAM",
+                                 "IL1B",
+                                 "ICAM1", 
+                                 "CCR1", 
+                                 "IL18",
+                                 "IL13RA1",
+                                "TNFSF12",
+                                "CD40",
+                                "CXCL2", 
+                                "HAVCR2",
+                                "LRP1", 
+                                "LILRB4"),
+              dot.scale = 6) + coord_flip()+
+  theme(legend.position = "none")+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+p2 <- DotPlot(K43R_ME_6, features = c("ITGB3",
+                                      "CD72",
+                                      "FCER2",
+                                      "ADRB2",
+                                       "ITGAL", 
+                                       "CCL3", 
+                                      "IL18RAP", 
+                                      "IL4", 
+                                       "TNFRSF25",
+                                      "CD40LG",
+                                      "DPP4", 
+                                      "LGALS9",
+                                      "MDK" ,
+                                      "LAIR1"), 
+              group.by = "celltype_1", dot.scale = 6, dot.min = 0.075) + coord_flip()+
+  theme(legend.position = "none")+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+p3 <- p1 + p2 + plot_layout(nrow = 1,widths = c(0.25,1)) 
+p3
+```
+
+
+### plot Dotplot for other TAMs
+```{r fig.width=10, fig.height=5}
+p1 <- DotPlot(TAM, features = c( "SIGLEC10",
+                                "ITGAX", 
+                                 "TNFRSF1B",
+                                "MS4A4A", 
+                                 "CSF1R", 
+                                 "ADGRE5", 
+                                "SELPLG", 
+                                "ALOX5", 
+                                "PECAM1",
+                                "CLEC2B", 
+                                 "TNFRSF14",
+                                "TGFB1",
+                                "VSIR"),
+              dot.scale = 6.5) + coord_flip()+
+  theme(legend.position = "none")+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+p2 <- DotPlot(K43R_ME_6, features = c(  "CD52",
+                                        "ICAM1",
+                                        "GRN", 
+                                        "NRG1", 
+                                        "CSF1", 
+                                        "CD55", 
+                                      "SELL", 
+                                      "ALOX5AP", 
+                                      "CD38",
+                                      "KLRF1", 
+                                       "CD160", 
+                                      "TGFBR3", 
+                                      "CCL4L2"),
+              group.by = "celltype_1", dot.scale = 6, dot.min = 0.075) + coord_flip()+
+  theme(legend.position = "none")+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+p3 <- p1 + p2 + plot_layout(nrow = 1,widths = c(0.25,1)) 
+p3
+```
+
+
+
+--> for network plot see interaction vignette
+
+
+
+
+
+
