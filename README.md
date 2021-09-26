@@ -30,7 +30,7 @@ Contains numbered R markdown notebooks for figures 1-7 from the above study.
 
 ## Processing Pipeline:
 Contains templates for the Nextflow pipeline to conduct the following tasks:
-- [Preprocessing workflow](https://github.com/RippeLab/RRMM/tree/main/Processing-Pipeline/0_Preprocessing_nextflow)
-- Quality control and cell-type annotation
-- Identification of tumor subclones from the scRNA-seq data with InferCNV
-- Prediction of interactions between different cell types with CellPhoneDB
+- [Preprocessing, qc and cell type annotation with scrublet and SingleR](https://github.com/RippeLab/RRMM/tree/main/Processing-Pipeline/0_Preprocessing_nextflow)
+- [Create a summary table and a merged object of the final processed file](https://github.com/RippeLab/RRMM/tree/main/Processing-Pipeline/1_SummaryStatistics)
+- [Identification of tumor subclones from the scRNA-seq data with InferCNV](https://github.com/RippeLab/RRMM/tree/main/Processing-Pipeline/2_InferCNV_nextflow)
+- [Prediction of interactions between different cell types with CellPhoneDB](https://github.com/RippeLab/RRMM/tree/main/Processing-Pipeline/3_CellPhoneDB_nextflow)
