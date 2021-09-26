@@ -28,7 +28,7 @@ Contains numbered R markdown notebooks for figures 1-7 from the above study.
 ### Figure 7
 - [R Notebook Figure 7](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_7.nb.html)
 
-## Processing Pipeline:
+## Processing Pipeline (https://github.com/RippeLab/RRMM/tree/main/Processing-Pipeline):
 Contains templates for the Nextflow pipeline to conduct the following tasks:
 1. Quality control and cell-type annotation
 2. Identification of tumor subclones from the scRNA-seq data with InferCNV
