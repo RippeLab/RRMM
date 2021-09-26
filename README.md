@@ -2,7 +2,7 @@
 
 Nextflow data processing pipelines and R code for scRNA-seq analysis of relapsed and refractory multiple myeloma (RRMM) samples referred to as "RRMM project". Folders contain scripts to create figures with the data available at accession number GSE161801 of Gene Expression Omnibus (https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE161801). The scripts were used in the study "Subclone-specific microenvironmental impact and drug responses in refractory multiple myeloma revealed by single cell transcriptomics" by Stephan M. Tirier, Jan-Philipp Mallm, Simon Steiger, Alexandra M. Poos, Mohamed H. S. Awwad, Nicola Giesen, Nicola Casiraghi, Hana Susak, Katharina Bauer, Anja Baumann, Lukas John, Anja Seckinger, Dirk Hose, Carsten Müller-Tidow, Hartmut Goldschmidt, Oliver Stegle, Michael Hundemer, Niels Weinhold, Marc S. Raab and Karsten Rippe.
 
-## Figures:
+## Figures
 Contains numbered R markdown notebooks for figures 1-7 from the above study.
 
 ### Figure 1
@@ -28,7 +28,7 @@ Contains numbered R markdown notebooks for figures 1-7 from the above study.
 ### Figure 7
 - [R Notebook Figure 7](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_7.nb.html)
 
-## Processing Pipeline:
+## Processing Pipeline
 Contains templates for the Nextflow pipeline to conduct the following tasks:
 - [Preprocessing, qc and cell type annotation with scrublet and SingleR](https://github.com/RippeLab/RRMM/tree/main/Processing-Pipeline/0_Preprocessing_nextflow)
 - [Create a summary table and a merged object of the final processed file](https://github.com/RippeLab/RRMM/tree/main/Processing-Pipeline/1_SummaryStatistics)
