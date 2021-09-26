@@ -1,10 +1,10 @@
 # Subclone specific microenvironmental impact and drug responses in refractory multiple myeloma revealed by single cell transcriptomics
 
-Nextflow pipelines and R code for scRNA-seq analysis of relapsed and refractory multiple myeloma samples.  
-Folders contain scripts to create figures and a pipeline to process the raw data. 
+Nextflow data processing pipelines and R code for scRNA-seq analysis of relapsed and refractory multiple myeloma (RRMM) samples. Folders contain scripts to create figures with the data available at accession number GSE161801 of Gene Expression Omnibus (https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE161801). The scripts were used in the study "Subclone-specific microenvironmental impact and drug responses in refractory multiple myeloma revealed by single cell transcriptomics" by Stephan M. Tirier, Jan-Philipp Mallm, Simon Steiger, Alexandra M. Poos, Mohamed H. S. Awwad, Nicola Giesen, Nicola Casiraghi, Hana Susak, Katharina Bauer, Anja Baumann, Lukas John, Anja Seckinger, Dirk Hose, Carsten Müller-Tidow, Hartmut Goldschmidt, Oliver Stegle, Michael Hundemer, Niels Weinhold, Marc S. Raab and Karsten Rippe.
 
 ## Figures:
-Contains numbered R markdown notebooks for all figures in the manuscript.
+Contains numbered R markdown notebooks for figures 1-7 from the above study.
+
 ### Figure 1
 - [R Notebook Figure 1](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_1.nb.html)
 
@@ -21,7 +21,6 @@ Contains numbered R markdown notebooks for all figures in the manuscript.
 ### Figure 5
 - [R Notebook Figure 5](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_5.nb.html)
 
-
 ### Figure 6
 - [R Notebook Figure 6](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_6.nb.html)
 - [R Notebook Figure 6 interactions](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_6_interaction.nb.html)
@@ -29,9 +28,8 @@ Contains numbered R markdown notebooks for all figures in the manuscript.
 ### Figure 7
 - [R Notebook Figure 7](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_7.nb.html)
 
-
-## Processing-Pipeline:
-Contains templates for the nextflow pipeline to:
-1. Do quality Control and Cell-type annotation
-2. Infer Clonalilty tumor cells with scRNAseq (InferCNV)
-3. Predict cellular interactions with CellPhoneDB
+## Processing Pipeline:
+Contains templates for the Nextflow pipeline to conduct the following tasks:
+1. Quality control and cell-type annotation
+2. Identification of tumor subclones from the scRNA-seq data with InferCNV
+3. Prediction of interactions between different cell types with CellPhoneDB
