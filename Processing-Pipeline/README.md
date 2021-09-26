@@ -1,7 +1,6 @@
 # Nextflow pipelines developed for the RRMM project
-Contains analysis scripts and pipelines that should enable someone to reproduce the key steps Nextflow pipeline.
+This folder contains Nextflow pipelines and analysis scripts to conduct the following main steps:
 
-# Nextflow pipeline with the following key steps:
 1. Preprocessing, qc and cell type annotation with scrublet and SingleR
    - Input: 10x mtx files and raw HCA data
    - Requirements: annotated cell-type reference: HCA BM (also healthy reference for tumor cell-type)
