@@ -1,7 +1,7 @@
-# Specialized nextflow pipelines for the RRMM project
-Contains analysis scripts and pipelines that should enable someone to reproduce the key steps nextflow pipeline.
+# Specialized Nextflow pipelines for the RRMM project
+Contains analysis scripts and pipelines that should enable someone to reproduce the key steps Nextflow pipeline.
 
-# nextflow pipeline with 3 key steps:
+# Nextflow pipeline with 3 key steps:
 1. Preprocessing, qc and cell type annotation (scrublet, SingleR)
    - Input: 10x mtx files and raw HCA data
    - Requirements: annotated cell-type reference: HCA BM (also healthy reference for tumor cell-type)
