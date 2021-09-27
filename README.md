@@ -1,6 +1,7 @@
 # Nextflow data processing pipelines and R code for single cell RNA sequencing analysis of relapsed and refractory multiple myeloma
 
-The RRMM (relapsed and refractory multiple myeloma) repository contains Nextflow data processing pipelines and R code for single cell RNA sequencing (scRNA-seq) analysis. The code was used in the study "Subclone-specific microenvironmental impact and drug responses in refractory multiple myeloma revealed by single cell transcriptomics" by Stephan M. Tirier, Jan-Philipp Mallm, Simon Steiger, Alexandra M. Poos, Mohamed H. S. Awwad, Nicola Giesen, Nicola Casiraghi, Hana Susak, Katharina Bauer, Anja Baumann, Lukas John, Anja Seckinger, Dirk Hose, Carsten Müller-Tidow, Hartmut Goldschmidt, Oliver Stegle, Michael Hundemer, Niels Weinhold, Marc S. Raab and Karsten Rippe. Plots for main and supplementary figures of the study can be created with the R-scripts provided in the RRMM project and the data available at accession number GSE161801 of Gene Expression Omnibus (https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE161801). 
+The RRMM (relapsed and refractory multiple myeloma) repository contains Nextflow data processing pipelines and R code for single cell RNA sequencing (scRNA-seq) analysis. The code was used in the study "Subclone-specific microenvironmental impact and drug responses in refractory multiple myeloma revealed by single cell transcriptomics" by Stephan M. Tirier, Jan-Philipp Mallm, Simon Steiger, Alexandra M. Poos, Mohamed H. S. Awwad, Nicola Giesen, Nicola Casiraghi, Hana Susak, Katharina Bauer, Anja Baumann, Lukas John, Anja Seckinger, Dirk Hose, Carsten Müller-Tidow, Hartmut Goldschmidt, Oliver Stegle, Michael Hundemer, Niels Weinhold, Marc S. Raab and Karsten Rippe.   
+Plots for main and supplementary figures of the study can be created with the R-scripts provided in the RRMM project and the data available at accession number [GSE161801](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE161801) of Gene Expression Omnibus . 
 
 ## Figures
 Contains R markdown notebooks to recreate figures from the above study.
@@ -21,7 +22,7 @@ Contains R markdown notebooks to recreate figures from the above study.
 - [HTML Preview](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_5.nb.html)
 
 
-### CD16^+^ monocyte heterogeneity in RRMM
+### CD16+ monocyte heterogeneity in RRMM
 - [HTML Preview](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_6.nb.html)
 - [HTML Preview interactions](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_6_interaction.nb.html)
 
