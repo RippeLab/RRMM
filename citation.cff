@@ -1,5 +1,5 @@
-cff-version: 1.1.0
-message: "If you reuse this analysis and pipeline, please cite it as below."
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
 authors:
   - family-names: Steiger
     given-names: Simon
@@ -7,9 +7,12 @@ authors:
   - family-names: Rippe
     given-names: Karsten
     orcid: https://orcid.org/0000-0001-9951-9395
-- family-names: Tirier
+  - family-names: Tirier
     given-names: Stephan
     orcid: https://orcid.org/0000-0002-7249-6194
-title: RippeLab/RRMM: v1.0
+title: "Nextflow data processing pipelines and R code for single cell RNA sequencing   analysis of relapsed and refractory multiple myeloma."
 version: v1.0
 date-released: 2021-09-27
+url: "https://github.com/RippeLab/RRMM/"
+
+
