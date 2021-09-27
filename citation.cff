@@ -10,7 +10,7 @@ authors:
   - family-names: Rippe
     given-names: Karsten
     orcid: https://orcid.org/0000-0001-9951-9395
-title: "Nextflow data processing pipelines and R code for single cell RNA sequencing   analysis of relapsed and refractory multiple myeloma."
+title: "Nextflow data processing pipelines and R code for single cell RNA sequencing analysis of relapsed and refractory multiple myeloma."
 version: v1.0
 date-released: 2021-09-27
 doi: 10.5281/zenodo.5532552
