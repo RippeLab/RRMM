@@ -13,6 +13,7 @@ authors:
 title: "Nextflow data processing pipelines and R code for single cell RNA sequencing   analysis of relapsed and refractory multiple myeloma."
 version: v1.0
 date-released: 2021-09-27
+doi: 10.5281/zenodo.5532552
 url: "https://github.com/RippeLab/RRMM/"
 
 
