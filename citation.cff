@@ -1,0 +1,15 @@
+cff-version: 1.1.0
+message: "If you reuse this analysis and pipeline, please cite it as below."
+authors:
+  - family-names: Steiger
+    given-names: Simon
+    orcid: https://orcid.org/0000-0002-4845-5042
+  - family-names: Rippe
+    given-names: Karsten
+    orcid: https://orcid.org/0000-0001-9951-9395
+- family-names: Tirier
+    given-names: Stephan
+    orcid: https://orcid.org/0000-0002-7249-6194
+title: RippeLab/RRMM: v1.0
+version: v1.0
+date-released: 2021-09-27
