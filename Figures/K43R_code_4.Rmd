@@ -1,5 +1,5 @@
 ---
-title: "K43R_Fig_4 + Supplementary Fig. 4"
+title: "Analysis of cellular interaction of myeloma and BME cells"
 output: html_notebook
 ---
 
@@ -435,7 +435,7 @@ p1 <- VlnPlot(HCA_K43R_ME_rPCA.integrated_2, features = "CD74", pt.size = 0, slo
 p1
 ```
 
-### For Sup. Figure 6 (CD68 expression):
+### CD68 expression:
 ```{r fig.width=10, fig.height=5}
 p1 <- FeaturePlot(object = HCA_K43R_ME_rPCA.integrated_2,  features = c("CD68"), 
             cols = c("grey", "firebrick"), pt.size =0.005, min.cutoff = "q10", order = F, split.by = "donor_status") + blank

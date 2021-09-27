@@ -1,5 +1,5 @@
 ---
-title: "RRMM TAM Interaction Analysis Figure 6 and Supplementary Figure 7"
+title: "RRMM TAM Interaction Analysis"
 output: html_notebook
 ---
 
@@ -177,7 +177,7 @@ netgg <- as_tbl_graph(netgg) %>% mutate(class = ifelse(name %in% c("TAM1","TAM2"
 
 ## TAM interactions
 
-## Figure 6 G
+## Predicted cellular interactions
 
 Network plot of predicted cellular interactions between immune cell subsets in RRMM. Every cell type is connected to its 4 top interacting cell types based on the sum of interaction strengths. The node size corresponds to the number of connected cell types and the coloring corresponds to the interaction strength. 
 
@@ -214,7 +214,7 @@ rrmm
 ```
 
 
-## Supplementary Figure S8 G 
+## Predicted cellular interactions healthy
 
 Network plot of predicted cellular interactions between immune cell subsets in healthy donors. Every cell type is connected to its 4 top interacting cell types based on the sum of interaction strengths. The node size corresponds to the number of connected cell types and the coloring corresponds to the interaction strength. 
 

@@ -1,5 +1,5 @@
 ---
-title: "RRMM Cellular Interaction Analysis Figure 4"
+title: "Analysis of cellular interaction of myeloma and BME cells"
 output: html_notebook
 ---
 ```{r setup}
@@ -174,7 +174,7 @@ network_data$RRMM$TARGET<-ifelse(network_data$RRMM$TARGET=="Mono/Macro_CD14","Mo
 ```
 
 ## Network generation
-## Figure 4E
+## MM-Cellular-interactions
 Cellular interactions of myeloma tumor cells and BME cell types. Ligand-receptor expression was ordered according to the number of detected interactions. 
 ```{r fig.height=6,fig.width=8}
 
@@ -288,7 +288,7 @@ spec_interaction_difference <- spec_interaction_difference %>%
 
 ```
 
-# Figure 4 F
+# Cumulative number of interactions
 Bar plot of the cumulative number of interactions detected in a given BME cell type in RRMM samples in comparison to healthy donors. Grey, all interactions; red, gained interactions in RRMM; blue, lost interactions in RRMM. Only selected interactions detected in ≥3 patients were included. 
 
 ```{r }
@@ -365,7 +365,7 @@ network_data_patient <- do.call(rbind,map(set_names(c("HCA","RRMM")),function(gr
 
 ```
 
-## Figure S5 A
+## Interaction Strength
 ```{r fig.width=8,fig.height=5}
 
 network_data_patient$TARGET<-ifelse(network_data_patient$TARGET=="Mono/Macro_CD16","Mono_CD16",network_data_patient$TARGET)

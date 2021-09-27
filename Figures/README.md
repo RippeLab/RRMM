@@ -1,23 +1,23 @@
-## Figure 1
-- [HTML Preview Figure 1](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_1.nb.html)
+## RRMM samples and scRNA-seq dataset
+- [HTML Preview](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_1.nb.html)
 
-## Figure 2
-- [HTML Preview Figure 2](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_2.nb.html)
+## scRNA-seq analysis of RRMM tumor cells
+- [HTML Preview](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_2.nb.html)
 
-## Figure 3
-- [HTML Preview Figure 3](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_3.nb.html)
+## Treatment response of +1q subclones
+- [HTML Preview](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_3.nb.html)
 
-## Figure 4
-- [HTML Preview Figure 4](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_4.nb.html)
-- [HTML Preview Figure 4 Interactions](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_4_interaction.nb.html)
+## Analysis of cellular interaction of myeloma and BME cells
+- [HTML Preview](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_4.nb.html)
+- [HTML Preview Interactions](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_4_interaction.nb.html)
 
-## Figure 5
-- [HTML Preview Figure 5](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_5.nb.html)
+## T-cell heterogeneity in RRMM patient vs. healthy donor samples
+- [HTML Preview](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_5.nb.html)
 
 
-## Figure 6
-- [HTML Preview Figure 6](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_6.nb.html)
-- [HTML Preview Figure 6 interactions](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_6_interaction.nb.html)
+## CD16^+^ monocyte heterogeneity in RRMM
+- [HTML Preview](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_6.nb.html)
+- [HTML Preview interactions](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_6_interaction.nb.html)
 
-## Figure 7
-- [HTML Preview Figure 7](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_Fig_7.nb.html)
+## BME changes in +1q RRMM
+- [HTML Preview](http://htmlpreview.github.io/?https://raw.githubusercontent.com/RippeLab/RRMM/main/Figures/K43R_code_7.nb.html)
