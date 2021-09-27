@@ -1,7 +1,6 @@
 # R script to create a summary table
-TODO:
-Input: (1._StephanAnalysis)
-merged object after hand-made QC by stephan
+
+Input: (1.) merged object after hand-made QC
 
 1. Creates a Summary table
 2. Splits object into Tumor and ME
